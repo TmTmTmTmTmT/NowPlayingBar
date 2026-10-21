@@ -1,5 +1,12 @@
 import AppKit
 
+/// Borderless panel that can become key without activating the app — glass
+/// buttons render dimmed in a non-key window.
+final class CardPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let scriptURL: URL
     private let frameworkURL: URL
@@ -12,19 +19,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Left-click control card (artwork + transport + scrubber), hosted in a
     /// borderless glass panel (no popover arrow).
-    private var panel: NSPanel?
+    private var panel: CardPanel?
     private var controls: NowPlayingPopoverController!
     private var dismissMonitor: Any?
     private var activationObserver: NSObjectProtocol?
     private var panelIsShown: Bool { panel?.isVisible ?? false }
 
-    /// Glass transparency (also the fade-in target).
-    private let panelAlpha: CGFloat = 0.97
-    /// Glass blur at full strength — no sharp background bleed-through.
-    private let glassBlurOpacity: CGFloat = 1.0
-    /// Dark scrim over the blur: keeps the card dark (and its white controls
-    /// readable) even when it floats over bright content.
-    private let scrimAlpha: CGFloat = 0.22
+    /// Fade-in target (the glass has its own translucency).
+    private let panelAlpha: CGFloat = 1.0
 
     private var current: NowPlayingInfo?
 
@@ -141,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.controls.apply(detail)
 
             let size = self.controls.cardSize
-            // makePanel() bakes mask/scrim/rim to its creation bounds, so a
+            // makePanel() sizes the glass/card to its creation bounds, so a
             // card size change (shuffle & repeat option) needs a fresh panel.
             if let old = self.panel, old.frame.size != size {
                 old.orderOut(nil)
@@ -162,6 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                            display: true)
             panel.alphaValue = 0
             panel.orderFrontRegardless()
+            // Key (so glass buttons render active) without activating the app.
+            panel.makeKey()
 
             self.controls.startTicking()
             self.content.setHighlighted(true)
@@ -205,60 +209,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func makePanel() -> NSPanel {
+    private func makePanel() -> CardPanel {
         let size = controls.cardSize
-        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
-                            styleMask: [.borderless, .nonactivatingPanel],
-                            backing: .buffered, defer: true)
+        let panel = CardPanel(contentRect: NSRect(origin: .zero, size: size),
+                              styleMask: [.borderless, .nonactivatingPanel],
+                              backing: .buffered, defer: true)
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.level = .statusBar
         panel.isFloatingPanel = true
         // NOT hidesOnDeactivate: this is an accessory (LSUIElement) app that is
         // never the active app, so that flag would hide the panel instantly.
         // Dismissal is handled by the global click monitor instead.
         panel.hidesOnDeactivate = false
-        panel.appearance = NSAppearance(named: .vibrantDark)
         // alphaValue is set per-show for the fade; panelAlpha is the target.
 
-        let radius: CGFloat = 18
+        // One system Liquid Glass surface; the card is its content view.
         let bounds = NSRect(origin: .zero, size: size)
-
-        // Container clips both layers to a rounded rect (and shapes the shadow).
-        let container = NSView(frame: bounds)
-        container.wantsLayer = true
-        container.layer?.cornerRadius = radius
-        container.layer?.masksToBounds = true
-
-        // Glass background. Slightly < 1 alpha softens the blur a touch.
-        // Kept as a SIBLING of the controls so dimming it doesn't dim them.
-        let glass = NSVisualEffectView(frame: bounds)
-        glass.material = .popover    // lighter tint than .hudWindow
-        glass.blendingMode = .behindWindow
-        glass.state = .active
-        glass.maskImage = Self.roundedMask(radius: radius)
-        glass.autoresizingMask = [.width, .height]
-        glass.alphaValue = glassBlurOpacity
+        let glass = NSGlassEffectView(frame: bounds)
+        glass.style = .regular       // legibility first
+        glass.tintColor = nil
+        glass.cornerRadius = 22      // artwork radius 8 + inner padding 14
 
         let card = controls.view
         card.frame = bounds
         card.autoresizingMask = [.width, .height]
+        glass.contentView = card
 
-        container.addSubview(glass)
-        container.addSubview(card)   // controls render at full opacity on top
-
-        // Dark scrim: a sublayer INSIDE the glass (below the sheen) so it anchors
-        // contrast over bright backgrounds without dimming the sheen/rim cues or
-        // the controls. (A sibling view above the glass would dim the sheen.)
-        let scrim = CALayer()
-        scrim.frame = bounds
-        scrim.backgroundColor = NSColor.black.withAlphaComponent(scrimAlpha).cgColor
-        glass.layer?.addSublayer(scrim)
-
-        addGlassDecoration(on: container, glass: glass, bounds: bounds, radius: radius)
-
-        panel.contentView = container
+        panel.contentView = glass
         return panel
     }
 
@@ -288,64 +267,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.notificationCenter.removeObserver(o)
             activationObserver = nil
         }
-    }
-
-    /// Adds glass refraction cues: a soft top sheen over the blur and a bright
-    /// rim along the rounded edge (brightest at the top, with a faint bottom
-    /// pickup) — mimicking how real glass gathers and bends light at its edges.
-    private func addGlassDecoration(on container: NSView, glass: NSVisualEffectView,
-                                    bounds: NSRect, radius: CGFloat) {
-        // Tint lift — a faint white wash over the blur lifts the dark material
-        // (~30% less black tint) without weakening the blur itself.
-        let lift = CALayer()
-        lift.frame = bounds
-        lift.backgroundColor = NSColor.white.withAlphaComponent(0.15).cgColor
-        glass.layer?.addSublayer(lift)
-
-        // Top sheen — light gathered near the upper surface.
-        let sheen = CAGradientLayer()
-        sheen.frame = bounds
-        sheen.colors = [NSColor.white.withAlphaComponent(0.11).cgColor,
-                        NSColor.white.withAlphaComponent(0.0).cgColor]
-        sheen.locations = [0, 1]
-        sheen.startPoint = CGPoint(x: 0.5, y: 1.0)   // layer y is up → top
-        sheen.endPoint   = CGPoint(x: 0.5, y: 0.45)
-        glass.layer?.addSublayer(sheen)              // over blur, under controls
-
-        // Specular rim along the edge.
-        let rim = CAGradientLayer()
-        rim.frame = bounds
-        rim.colors = [NSColor.white.withAlphaComponent(0.50).cgColor,
-                      NSColor.white.withAlphaComponent(0.07).cgColor,
-                      NSColor.white.withAlphaComponent(0.18).cgColor]
-        rim.locations = [0, 0.55, 1]
-        rim.startPoint = CGPoint(x: 0.5, y: 1.0)
-        rim.endPoint   = CGPoint(x: 0.5, y: 0.0)
-
-        let inset: CGFloat = 0.75
-        let stroke = CAShapeLayer()
-        stroke.path = CGPath(roundedRect: bounds.insetBy(dx: inset, dy: inset),
-                             cornerWidth: radius - inset, cornerHeight: radius - inset,
-                             transform: nil)
-        stroke.lineWidth = 1.0
-        stroke.fillColor = NSColor.clear.cgColor
-        stroke.strokeColor = NSColor.white.cgColor
-        rim.mask = stroke
-        container.layer?.addSublayer(rim)            // on top, over the edges
-    }
-
-    /// A rounded-rect mask image (stretchable via cap insets) used to clip the
-    /// glass blur to rounded corners.
-    private static func roundedMask(radius: CGFloat) -> NSImage {
-        let edge = radius * 2 + 1
-        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
-            return true
-        }
-        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
-        image.resizingMode = .stretch
-        return image
     }
 
     private func displayableInfo() -> NowPlayingInfo? {

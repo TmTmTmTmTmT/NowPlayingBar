@@ -1,6 +1,6 @@
 # NowPlayingBar
 
-![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue)
+![macOS 26+](https://img.shields.io/badge/macOS-26%2B-blue)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
@@ -27,8 +27,8 @@ long titles **scroll slowly to the left (marquee)** to reveal the whole thing.
 
 ## Requirements
 
-- macOS 13 or later (developed on macOS 26 "Tahoe").
-- The **Command Line Tools** (clang + Swift). No Xcode, no Homebrew.
+- macOS 26 or later (Liquid Glass control card).
+- Xcode 26 or the Command Line Tools with the macOS 26 SDK (Swift 5.9+). No Homebrew.
 
 ## Build & run
 

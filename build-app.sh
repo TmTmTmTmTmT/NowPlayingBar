@@ -24,7 +24,7 @@ mkdir -p "$CONTENTS/MacOS" "$RES"
 echo "==> [1/3] Building MediaRemoteAdapter.framework (clang)"
 mkdir -p "$FW/Versions/A/Resources"
 clang -dynamiclib -fobjc-arc -fvisibility=default \
-    -mmacosx-version-min=13.0 \
+    -mmacosx-version-min=26.0 \
     -I "$VENDOR/include" -I "$VENDOR/src" \
     -framework Foundation -framework AppKit -framework UniformTypeIdentifiers \
     -install_name @rpath/MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter \

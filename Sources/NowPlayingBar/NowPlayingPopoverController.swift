@@ -58,11 +58,14 @@ final class NowPlayingPopoverController: NSViewController {
     private let artworkView   = ClickableImageView()
     private let titleMarquee  = MarqueeView(frame: .zero)
     private let artistMarquee = MarqueeView(frame: .zero)
-    private let prevButton  = HoverButton()
-    private let playButton  = HoverButton()
-    private let nextButton  = HoverButton()
-    private let shuffleButton = HoverButton()
-    private let repeatButton  = HoverButton()
+    private let prevButton  = NSButton()
+    private let playButton  = NSButton()
+    private let nextButton  = NSButton()
+    private let shuffleButton = NSButton()
+    private let repeatButton  = NSButton()
+    /// Glass group holding the transport row; spacing keeps the circles separate.
+    private let buttonGroup = NSGlassEffectContainerView()
+    private let buttonRow   = NSView()
     private let scrubBar    = ScrubBar()
     private let elapsedLabel   = NSTextField(labelWithString: "0:00")
     private let remainingLabel = NSTextField(labelWithString: "-0:00")
@@ -89,10 +92,10 @@ final class NowPlayingPopoverController: NSViewController {
 
         // Title + artist scroll (marquee) when wider than their column.
         titleMarquee.font = .systemFont(ofSize: 13, weight: .bold)
-        titleMarquee.baseColor = .white                                   // fixed: card is always dark glass
+        titleMarquee.baseColor = .labelColor
         titleMarquee.pointsPerSecond = 30
         artistMarquee.font = .systemFont(ofSize: 11.5, weight: .regular)
-        artistMarquee.baseColor = NSColor.white.withAlphaComponent(0.78)  // brighter than secondary
+        artistMarquee.baseColor = .secondaryLabelColor
         artistMarquee.pointsPerSecond = 30
 
         configure(prevButton, symbol: "backward.fill", point: 16, action: #selector(previous))
@@ -127,31 +130,40 @@ final class NowPlayingPopoverController: NSViewController {
         let timeFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         for label in [elapsedLabel, remainingLabel] {
             label.font = timeFont
-            label.textColor = NSColor.white.withAlphaComponent(0.78)  // match artist/album
+            label.textColor = .secondaryLabelColor  // match artist/album
         }
         remainingLabel.alignment = .right
 
-        [artworkView, titleMarquee, artistMarquee, prevButton, playButton,
-         nextButton, shuffleButton, repeatButton, scrubBar, elapsedLabel,
+        // All buttons live in one row inside a glass container (spacing < the
+        // gap between circles, so they stay individual).
+        [prevButton, playButton, nextButton, shuffleButton, repeatButton]
+            .forEach(buttonRow.addSubview)
+        buttonGroup.spacing = 6
+        buttonGroup.contentView = buttonRow
+
+        [artworkView, titleMarquee, artistMarquee, buttonGroup, scrubBar, elapsedLabel,
          remainingLabel].forEach(container.addSubview)
 
         view = container
     }
 
-    private func configure(_ button: HoverButton, symbol: String, point: CGFloat, action: Selector) {
+    private func configure(_ button: NSButton, symbol: String, point: CGFloat, action: Selector) {
         let cfg = NSImage.SymbolConfiguration(pointSize: point, weight: .medium)
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg)
+        button.bezelStyle = .glass
+        button.borderShape = .circle
+        button.controlSize = .large
         button.imagePosition = .imageOnly
-        button.isBordered = false
-        button.bezelStyle = .regularSquare
-        button.imageScaling = .scaleNone   // glyph keeps its natural size; the frame only sizes the circle
+        button.imageScaling = .scaleNone   // glyph keeps its natural size; the frame sizes the circle
         button.target = self
         button.action = action
-        // The circle itself is the hover region (no inset), so neighbouring
-        // buttons never highlight together.
-        button.hoverInset = 0
-        button.applyIdle()
+    }
+
+    /// Shuffle / repeat "on" look: accent-tinted glass; off = system default.
+    private func setActive(_ button: NSButton, _ on: Bool) {
+        button.tintProminence = on ? .primary : .automatic
+        button.bezelColor = on ? .controlAccentColor : nil
     }
 
     // MARK: - Layout (explicit frames; card size is fixed)
@@ -168,7 +180,6 @@ final class NowPlayingPopoverController: NSViewController {
         // Right column.
         let rx = pad + art + 16
         let rw = w - rx - pad
-        let cx = rx + rw / 2
 
         let titleH: CGFloat = 20
         titleMarquee.frame  = NSRect(x: rx, y: h - pad - titleH, width: rw, height: titleH)
@@ -181,7 +192,7 @@ final class NowPlayingPopoverController: NSViewController {
         scrubBar.frame = NSRect(x: rx, y: scrubY, width: rw, height: 16)
 
         // Transport row, centered between the artist line and the scrubber,
-        // nudged down a few points. Frames are circles (diameter = highlight);
+        // nudged down a few points. Frames are circles (glass follows the frame);
         // cy is floored and diameters are even so origins land on whole points.
         let bandTop = artistMarquee.frame.minY
         let bandBottom = scrubBar.frame.maxY
@@ -189,8 +200,13 @@ final class NowPlayingPopoverController: NSViewController {
         let wide = showsShuffleRepeat
         let playD: CGFloat = 38, skipD: CGFloat = 34, modeD: CGFloat = 28
         let skipOff: CGFloat = wide ? 42 : 50
-        func circle(_ b: HoverButton, _ dx: CGFloat, _ d: CGFloat) {
-            b.frame = NSRect(x: cx + dx - d / 2, y: cy - d / 2, width: d, height: d)
+        // The row spans the transport band; buttons are laid out in its
+        // coordinates (row origin and size are whole points).
+        let rowH: CGFloat = playD
+        buttonGroup.frame = NSRect(x: rx, y: cy - rowH / 2, width: rw, height: rowH)
+        buttonRow.frame = buttonGroup.bounds
+        func circle(_ b: NSButton, _ dx: CGFloat, _ d: CGFloat) {
+            b.frame = NSRect(x: rw / 2 + dx - d / 2, y: rowH / 2 - d / 2, width: d, height: d)
         }
         circle(playButton, 0, playD)
         circle(prevButton, -skipOff, skipD)
@@ -382,11 +398,10 @@ final class NowPlayingPopoverController: NSViewController {
         }
     }
 
-    /// Sends the toggle command, flashes the button, and (if the state is known)
+    /// Sends the toggle command and (if the state is known)
     /// predicts the next state at once; a re-read 0.4 s later confirms it.
     @objc private func toggleShuffle() {
         monitor.send(command: 6)
-        shuffleButton.flash()
         if var m = modes {
             m.shuffle.toggle()
             modes = m
@@ -397,7 +412,6 @@ final class NowPlayingPopoverController: NSViewController {
 
     @objc private func toggleRepeat() {
         monitor.send(command: 7)
-        repeatButton.flash()
         if var m = modes {
             m.repeatMode = m.repeatMode.next
             modes = m
@@ -439,13 +453,13 @@ final class NowPlayingPopoverController: NSViewController {
 
     private func updateModeButtons() {
         guard isViewLoaded else { return }
-        shuffleButton.isActive = modes?.shuffle == true
+        setActive(shuffleButton, modes?.shuffle == true)
         let rep = modes?.repeatMode ?? .off
         let symbol = rep == .one ? "repeat.1" : "repeat"
         let cfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
         repeatButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg)
-        repeatButton.isActive = rep != .off
+        setActive(repeatButton, rep != .off)
     }
 
     /// Launches the source app if not running, or brings it to the front.
@@ -490,189 +504,5 @@ final class ClickableImageView: NSImageView {
         animator().alphaValue = 1
         let p = convert(event.locationInWindow, from: nil)
         if bounds.contains(p) { onClick?() }
-    }
-}
-
-/// A borderless transport button that "activates" on hover: the glyph brightens
-/// and a soft rounded highlight fades in behind it. The hover region can be
-/// expanded past the bounds via `hoverInset` so it triggers as the pointer nears.
-final class HoverButton: NSButton {
-    var hoverInset: CGFloat = 0          // negative = larger-than-bounds hover area
-    private var tracking: NSTrackingArea?
-    private var hovered = false
-    /// Marks a toggle as "on": blue glyph, kept while hovering (the hover
-    /// background circle still shows).
-    var isActive = false { didSet { updateTint() } }
-    // Fixed white, NOT labelColor: the dark glass card must keep white glyphs
-    // even when the panel floats over bright content (dynamic colors can
-    // resolve dark there and the buttons vanish).
-    private let idleTint  = NSColor.white.withAlphaComponent(0.85)
-    private let hoverTint = NSColor.white
-
-    private func updateTint() {
-        contentTintColor = isActive ? .systemBlue : (hovered ? hoverTint : idleTint)
-    }
-
-    /// Set the resting (un-hovered) appearance.
-    func applyIdle() {
-        wantsLayer = true
-        // No masksToBounds: cornerRadius still rounds the background, but the
-        // glyph must not be clipped by the circle.
-        updateTint()
-        layer?.backgroundColor = NSColor.clear.cgColor
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let t = tracking { removeTrackingArea(t) }
-        let area = bounds.insetBy(dx: hoverInset, dy: hoverInset)
-        let t = NSTrackingArea(rect: area,
-                               options: [.mouseEnteredAndExited, .activeAlways],
-                               owner: self, userInfo: nil)
-        addTrackingArea(t)
-        tracking = t
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        layer?.cornerRadius = min(newSize.width, newSize.height) / 2
-    }
-
-    override func layout() {
-        super.layout()
-        layer?.cornerRadius = min(bounds.width, bounds.height) / 2
-    }
-
-    override func mouseEntered(with event: NSEvent) { setHovered(true) }
-    override func mouseExited(with event: NSEvent)  { setHovered(false) }
-
-    /// Click feedback: the highlight circle flashes brighter, then eases back
-    /// to its hover value (still inside) or clear.
-    func flash() {
-        guard let layer else { return }
-        layer.removeAnimation(forKey: "flash")
-        let rest = (hovered ? NSColor.white.withAlphaComponent(0.16) : NSColor.clear).cgColor
-        let anim = CABasicAnimation(keyPath: "backgroundColor")
-        anim.fromValue = NSColor.white.withAlphaComponent(0.32).cgColor
-        anim.toValue = rest
-        anim.duration = 0.2
-        anim.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        layer.backgroundColor = rest
-        layer.add(anim, forKey: "flash")
-    }
-
-    private func setHovered(_ on: Bool) {
-        hovered = on
-        updateTint()
-        layer?.removeAnimation(forKey: "flash")
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(0.138)
-        layer?.backgroundColor = on
-            ? NSColor.white.withAlphaComponent(0.16).cgColor
-            : NSColor.clear.cgColor
-        CATransaction.commit()
-    }
-}
-
-/// A custom scrubber: a slim progress bar with no knob at rest. On hover the
-/// bar turns white and a draggable knob fades in. Click or drag to seek.
-final class ScrubBar: NSView {
-    var duration: Double = 1 { didSet { needsDisplay = true } }
-    var position: Double = 0 {
-        didSet { if !isDragging { needsDisplay = true } }
-    }
-
-    /// Called continuously while dragging (to update time labels).
-    var onSeekPreview: ((Double) -> Void)?
-    /// Called once on mouse-up (to commit the seek).
-    var onSeekCommit: ((Double) -> Void)?
-
-    private(set) var isDragging = false
-    private var hovered = false
-    private var tracking: NSTrackingArea?
-
-    private let hInset: CGFloat = 6          // keeps the knob inside the bounds
-    private let knobDiameter: CGFloat = 11
-
-    override var isFlipped: Bool { false }
-    override var wantsUpdateLayer: Bool { false }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let t = tracking { removeTrackingArea(t) }
-        let t = NSTrackingArea(rect: bounds,
-                               options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                               owner: self, userInfo: nil)
-        addTrackingArea(t)
-        tracking = t
-    }
-
-    override func mouseEntered(with event: NSEvent) { hovered = true;  needsDisplay = true }
-    override func mouseExited(with event: NSEvent)  { hovered = false; needsDisplay = true }
-
-    // MARK: Interaction
-
-    private func fraction(at point: NSPoint) -> Double {
-        let usable = bounds.width - hInset * 2
-        guard usable > 0 else { return 0 }
-        return min(max((point.x - hInset) / usable, 0), 1)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        isDragging = true
-        seekPreview(with: event)
-    }
-    override func mouseDragged(with event: NSEvent) {
-        seekPreview(with: event)
-    }
-    override func mouseUp(with event: NSEvent) {
-        let f = fraction(at: convert(event.locationInWindow, from: nil))
-        position = f * duration
-        isDragging = false
-        onSeekCommit?(position)
-        needsDisplay = true
-    }
-
-    private func seekPreview(with event: NSEvent) {
-        let f = fraction(at: convert(event.locationInWindow, from: nil))
-        position = f * duration
-        onSeekPreview?(position)
-        needsDisplay = true
-    }
-
-    // MARK: Drawing
-
-    override func draw(_ dirtyRect: NSRect) {
-        let trackH: CGFloat = hovered ? 5 : 3
-        let y = (bounds.height - trackH) / 2
-        let x0 = hInset
-        let usable = bounds.width - hInset * 2
-        let frac = duration > 0 ? CGFloat(min(max(position / duration, 0), 1)) : 0
-        let fillW = usable * frac
-
-        let bgColor   = NSColor.white.withAlphaComponent(0.22)
-        let fillColor = hovered ? NSColor.white : NSColor.systemBlue
-
-        // Background track (capsule).
-        let bg = NSBezierPath(roundedRect: NSRect(x: x0, y: y, width: usable, height: trackH),
-                              xRadius: trackH / 2, yRadius: trackH / 2)
-        bgColor.setFill(); bg.fill()
-
-        // Filled portion.
-        if fillW > 0 {
-            let fill = NSBezierPath(roundedRect: NSRect(x: x0, y: y, width: fillW, height: trackH),
-                                    xRadius: trackH / 2, yRadius: trackH / 2)
-            fillColor.setFill(); fill.fill()
-        }
-
-        // Knob — only on hover.
-        if hovered {
-            let cx = x0 + fillW
-            let cy = bounds.height / 2
-            let knob = NSBezierPath(ovalIn: NSRect(x: cx - knobDiameter / 2,
-                                                   y: cy - knobDiameter / 2,
-                                                   width: knobDiameter, height: knobDiameter))
-            NSColor.white.setFill(); knob.fill()
-        }
     }
 }
