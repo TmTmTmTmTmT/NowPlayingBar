@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>NowPlayingBar</string>
+    <key>CFBundleDisplayName</key>
+    <string>Now Playing Bar</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.local.nowplayingbar</string>
+    <key>CFBundleExecutable</key>
+    <string>NowPlayingBar</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Shows Music's shuffle and repeat state in the control card.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Bundles ungive/mediaremote-adapter (BSD 3-Clause). See mediaremote-adapter.LICENSE.</string>
+</dict>
+</plist>
