@@ -29,6 +29,16 @@ final class NowPlayingPopoverController: NSViewController {
         }
     }
 
+    /// Single source of truth for transport symbol sizes (semibold, monochrome).
+    private static let playPoint: CGFloat = 16        // play.fill and pause.fill share it
+    private static let skipPoint: CGFloat = 10
+    private static let modePoint: CGFloat = 12     // shuffle / repeat: plain icon buttons
+
+    private static func symbolImage(_ name: String, point: CGFloat) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: point, weight: .semibold))
+    }
+
     private let monitor: NowPlayingMonitor
 
     private var detail: NowPlayingDetail?
@@ -84,7 +94,8 @@ final class NowPlayingPopoverController: NSViewController {
 
         artworkView.imageScaling = .scaleProportionallyUpOrDown
         artworkView.wantsLayer = true
-        artworkView.layer?.cornerRadius = 8
+        artworkView.layer?.cornerRadius = 8       // concentric with the card: 22 - 14 padding
+        artworkView.layer?.cornerCurve = .continuous
         artworkView.layer?.masksToBounds = true
         artworkView.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
         // Click the artwork to launch / focus the source app.
@@ -98,11 +109,11 @@ final class NowPlayingPopoverController: NSViewController {
         artistMarquee.baseColor = .secondaryLabelColor
         artistMarquee.pointsPerSecond = 30
 
-        configure(prevButton, symbol: "backward.fill", point: 16, action: #selector(previous))
-        configure(playButton, symbol: "pause.fill",    point: 24, action: #selector(togglePlay))
-        configure(nextButton, symbol: "forward.fill",  point: 16, action: #selector(next))
-        configure(shuffleButton, symbol: "shuffle", point: 12, action: #selector(toggleShuffle))
-        configure(repeatButton,  symbol: "repeat",  point: 12, action: #selector(toggleRepeat))
+        configure(prevButton, symbol: "backward.fill", point: Self.skipPoint, action: #selector(previous))
+        configure(playButton, symbol: "pause.fill",    point: Self.playPoint, action: #selector(togglePlay))
+        configure(nextButton, symbol: "forward.fill",  point: Self.skipPoint, action: #selector(next))
+        configure(shuffleButton, symbol: "shuffle", point: Self.modePoint, action: #selector(toggleShuffle))
+        configure(repeatButton,  symbol: "repeat",  point: Self.modePoint, action: #selector(toggleRepeat))
         shuffleButton.toolTip = "Toggle shuffle"
         repeatButton.toolTip = "Toggle repeat"
         shuffleButton.isHidden = !showsShuffleRepeat
@@ -148,22 +159,23 @@ final class NowPlayingPopoverController: NSViewController {
     }
 
     private func configure(_ button: NSButton, symbol: String, point: CGFloat, action: Selector) {
-        let cfg = NSImage.SymbolConfiguration(pointSize: point, weight: .medium)
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(cfg)
-        button.bezelStyle = .glass
-        button.borderShape = .circle
-        button.controlSize = .large
+        button.image = Self.symbolImage(symbol, point: point)
+        if button === shuffleButton || button === repeatButton {
+            button.isBordered = false      // plain icon button, no glass circle
+        } else {
+            button.bezelStyle = .glass
+            button.borderShape = .circle
+            button.controlSize = .large
+        }
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleNone   // glyph keeps its natural size; the frame sizes the circle
         button.target = self
         button.action = action
     }
 
-    /// Shuffle / repeat "on" look: accent-tinted glass; off = system default.
+    /// Shuffle / repeat "on" look: accent icon color (off = secondary label).
     private func setActive(_ button: NSButton, _ on: Bool) {
-        button.tintProminence = on ? .primary : .automatic
-        button.bezelColor = on ? .controlAccentColor : nil
+        button.contentTintColor = on ? .controlAccentColor : .secondaryLabelColor
     }
 
     // MARK: - Layout (explicit frames; card size is fixed)
@@ -191,14 +203,15 @@ final class NowPlayingPopoverController: NSViewController {
         let scrubY = pad + 13 + 4
         scrubBar.frame = NSRect(x: rx, y: scrubY, width: rw, height: 16)
 
-        // Transport row, centered between the artist line and the scrubber,
-        // nudged down a few points. Frames are circles (glass follows the frame);
-        // cy is floored and diameters are even so origins land on whole points.
-        let bandTop = artistMarquee.frame.minY
+        // Transport row, anchored a fixed gap above the scrubber frame (the gap
+        // above, to the artist line, is the remainder: 5pt at the current sizes,
+        // keep >= 4). Frames are circles (glass follows the frame); diameters are
+        // even and cy is whole, so origins land on whole points.
         let bandBottom = scrubBar.frame.maxY
-        let cy = ((bandTop + bandBottom) / 2 - 5).rounded(.down)
-        let wide = showsShuffleRepeat
         let playD: CGFloat = 38, skipD: CGFloat = 34, modeD: CGFloat = 28
+        let gapBelow: CGFloat = 8
+        let cy = (bandBottom + gapBelow + playD / 2).rounded()
+        let wide = showsShuffleRepeat
         let skipOff: CGFloat = wide ? 42 : 50
         // The row spans the transport band; buttons are laid out in its
         // coordinates (row origin and size are whole points).
@@ -311,6 +324,7 @@ final class NowPlayingPopoverController: NSViewController {
             overlay.contents = cg
             overlay.contentsGravity = .resizeAspect
             overlay.cornerRadius = host.cornerRadius
+            overlay.cornerCurve = .continuous
             overlay.masksToBounds = true
             host.addSublayer(overlay)
 
@@ -333,10 +347,8 @@ final class NowPlayingPopoverController: NSViewController {
     }
 
     private func setPlayIcon(isPlaying: Bool) {
-        let cfg = NSImage.SymbolConfiguration(pointSize: 24, weight: .medium)
-        playButton.image = NSImage(systemSymbolName: isPlaying ? "pause.fill" : "play.fill",
-                                   accessibilityDescription: nil)?
-            .withSymbolConfiguration(cfg)
+        playButton.image = Self.symbolImage(isPlaying ? "pause.fill" : "play.fill",
+                                            point: Self.playPoint)
     }
 
     private func refreshProgress() {
@@ -456,9 +468,7 @@ final class NowPlayingPopoverController: NSViewController {
         setActive(shuffleButton, modes?.shuffle == true)
         let rep = modes?.repeatMode ?? .off
         let symbol = rep == .one ? "repeat.1" : "repeat"
-        let cfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
-        repeatButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(cfg)
+        repeatButton.image = Self.symbolImage(symbol, point: Self.modePoint)
         setActive(repeatButton, rep != .off)
     }
 
