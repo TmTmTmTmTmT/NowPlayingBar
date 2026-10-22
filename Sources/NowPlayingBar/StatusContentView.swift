@@ -44,6 +44,17 @@ final class StatusContentView: NSView {
     func clearTitle()              { marquee.setText("") }
     func setHighlighted(_ flag: Bool) { marquee.recolor(highlighted: flag) }
 
+    /// Dim the title while paused. Animates only the inner marquee's alpha —
+    /// `alphaValue` of this view belongs to the show / hide / crossfade code.
+    /// Independent of the highlight color, so it holds while highlighted too.
+    func setPaused(_ paused: Bool) {
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.3
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            marquee.animator().alphaValue = paused ? 0.5 : 1.0
+        }
+    }
+
     // MARK: - Layout
 
     override func layout() {

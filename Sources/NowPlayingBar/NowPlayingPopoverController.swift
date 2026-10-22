@@ -30,9 +30,9 @@ final class NowPlayingPopoverController: NSViewController {
     }
 
     /// Single source of truth for transport symbol sizes (semibold, monochrome).
-    private static let playPoint: CGFloat = 16        // play.fill and pause.fill share it
-    private static let skipPoint: CGFloat = 10
-    private static let modePoint: CGFloat = 12     // shuffle / repeat: plain icon buttons
+    private static let playPoint: CGFloat = 20        // play.fill and pause.fill share it
+    private static let skipPoint: CGFloat = 14
+    private static let modePoint: CGFloat = 12     // shuffle / repeat: plain icon buttons (all five are borderless)
 
     private static func symbolImage(_ name: String, point: CGFloat) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)?
@@ -57,6 +57,21 @@ final class NowPlayingPopoverController: NSViewController {
     /// Source's shuffle / repeat state (Music only); nil = unknown.
     private var modes: PlaybackModes?
     private var modesFetchInFlight = false
+    /// Duration of each leg (out / in) of a track change. Shared with the menu
+    /// bar title so text and artwork transitions run in step.
+    static let transitionLeg: TimeInterval = 0.25
+    /// Called once per `beginTrackTransition` when the new track's text and
+    /// artwork are both in hand; the owner then calls `finishTrackTransition`.
+    var onTransitionReady: (() -> Void)?
+    /// True between `beginTrackTransition` and `finishTrackTransition`: visible
+    /// text / artwork stay frozen (text faded out) while new data is only stored.
+    private var transitionPending = false
+    private var transitionOldKey: String?      // track key shown when the transition began
+    private var pendingKey: String?            // newest track key seen while pending
+    private var pendingTitle: String?
+    private var pendingArtist: String?
+    private var pendingArtwork: NSImage?
+    private var transitionReadyFired = false
     /// Set when automation permission was denied: stops periodic fetches until
     /// the panel is reopened (one retry per open).
     private var modesDenied = false
@@ -73,8 +88,7 @@ final class NowPlayingPopoverController: NSViewController {
     private let nextButton  = NSButton()
     private let shuffleButton = NSButton()
     private let repeatButton  = NSButton()
-    /// Glass group holding the transport row; spacing keeps the circles separate.
-    private let buttonGroup = NSGlassEffectContainerView()
+    /// Holds all five buttons, placed directly in the card (no glass).
     private let buttonRow   = NSView()
     private let scrubBar    = ScrubBar()
     private let elapsedLabel   = NSTextField(labelWithString: "0:00")
@@ -145,14 +159,11 @@ final class NowPlayingPopoverController: NSViewController {
         }
         remainingLabel.alignment = .right
 
-        // All buttons live in one row inside a glass container (spacing < the
-        // gap between circles, so they stay individual).
+        // All buttons live in one plain row view.
         [prevButton, playButton, nextButton, shuffleButton, repeatButton]
             .forEach(buttonRow.addSubview)
-        buttonGroup.spacing = 6
-        buttonGroup.contentView = buttonRow
 
-        [artworkView, titleMarquee, artistMarquee, buttonGroup, scrubBar, elapsedLabel,
+        [artworkView, titleMarquee, artistMarquee, buttonRow, scrubBar, elapsedLabel,
          remainingLabel].forEach(container.addSubview)
 
         view = container
@@ -160,15 +171,12 @@ final class NowPlayingPopoverController: NSViewController {
 
     private func configure(_ button: NSButton, symbol: String, point: CGFloat, action: Selector) {
         button.image = Self.symbolImage(symbol, point: point)
-        if button === shuffleButton || button === repeatButton {
-            button.isBordered = false      // plain icon button, no glass circle
-        } else {
-            button.bezelStyle = .glass
-            button.borderShape = .circle
-            button.controlSize = .large
+        button.isBordered = false          // plain icon button, no glass circle
+        if button !== shuffleButton && button !== repeatButton {
+            button.contentTintColor = .labelColor   // shuffle / repeat: see setActive
         }
         button.imagePosition = .imageOnly
-        button.imageScaling = .scaleNone   // glyph keeps its natural size; the frame sizes the circle
+        button.imageScaling = .scaleNone   // glyph keeps its natural size; the frame is only the click area
         button.target = self
         button.action = action
     }
@@ -203,21 +211,20 @@ final class NowPlayingPopoverController: NSViewController {
         let scrubY = pad + 13 + 4
         scrubBar.frame = NSRect(x: rx, y: scrubY, width: rw, height: 16)
 
-        // Transport row, anchored a fixed gap above the scrubber frame (the gap
-        // above, to the artist line, is the remainder: 5pt at the current sizes,
-        // keep >= 4). Frames are circles (glass follows the frame); diameters are
-        // even and cy is whole, so origins land on whole points.
-        let bandBottom = scrubBar.frame.maxY
+        // Transport row. No circles are drawn, so the frames are just click
+        // areas; the row is centered on the play icon. cy balances the visible
+        // gaps (local coords, y up): artist text bottom ~99, scrubber track top
+        // ~41 (slider frame 31...47, track centered), play icon visible height
+        // ~1.04 * playPoint ~= 21. Equal gaps -> cy = (99 + 41) / 2 = 70
+        // (icon spans ~59.6...80.4: 18.6 above to the text, 18.6 below to the track).
         let playD: CGFloat = 38, skipD: CGFloat = 34, modeD: CGFloat = 28
-        let gapBelow: CGFloat = 8
-        let cy = (bandBottom + gapBelow + playD / 2).rounded()
+        let cy: CGFloat = 70
         let wide = showsShuffleRepeat
         let skipOff: CGFloat = wide ? 42 : 50
         // The row spans the transport band; buttons are laid out in its
         // coordinates (row origin and size are whole points).
         let rowH: CGFloat = playD
-        buttonGroup.frame = NSRect(x: rx, y: cy - rowH / 2, width: rw, height: rowH)
-        buttonRow.frame = buttonGroup.bounds
+        buttonRow.frame = NSRect(x: rx, y: cy - rowH / 2, width: rw, height: rowH)
         func circle(_ b: NSButton, _ dx: CGFloat, _ d: CGFloat) {
             b.frame = NSRect(x: rw / 2 + dx - d / 2, y: rowH / 2 - d / 2, width: d, height: d)
         }
@@ -250,6 +257,26 @@ final class NowPlayingPopoverController: NSViewController {
         detail = d
         if isTrackChange { fetchModes() }
 
+        if transitionPending {
+            // Frozen: visible text / artwork change only in finishTrackTransition.
+            // The newest track wins; text + artwork must both be stored first.
+            if key != transitionOldKey {
+                pendingKey = key
+                pendingTitle = d.title
+                pendingArtist = artistText(d)
+                if let art = d.artwork { pendingArtwork = art }
+                if !transitionReadyFired, pendingArtwork != nil {
+                    transitionReadyFired = true
+                    onTransitionReady?()
+                }
+            }
+            setPlayIcon(isPlaying: d.isPlaying)
+            scrubBar.duration = max(d.duration, 1)
+            refreshProgress()
+            reconcileArtwork()
+            return
+        }
+
         // Title + artist.
         if isTrackChange {
             animateTextChange(to: d)
@@ -279,6 +306,7 @@ final class NowPlayingPopoverController: NSViewController {
     private func reconcileArtwork() {
         guard ticker != nil else { return }
         guard shownArtworkKey != lastTrackKey else { artworkRetryCount = 0; return }
+        if transitionPending, pendingArtwork != nil { return }   // arrived; waits for finish
         guard artworkRetryCount < maxArtworkRetries else { return }
         artworkRetryCount += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
@@ -290,8 +318,65 @@ final class NowPlayingPopoverController: NSViewController {
         }
     }
 
+    // MARK: - Track transition (driven by the owner; see AppDelegate)
+
+    /// Starts the "out" leg: title + artist fade out and stay hidden until
+    /// `finishTrackTransition`. Calling again (quick skips) restarts the wait;
+    /// the last track seen wins.
+    func beginTrackTransition() {
+        _ = view
+        transitionPending = true
+        transitionOldKey = lastTrackKey
+        pendingKey = nil
+        pendingTitle = nil
+        pendingArtist = nil
+        pendingArtwork = nil
+        transitionReadyFired = false
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Self.transitionLeg
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            titleMarquee.animator().alphaValue = 0
+            artistMarquee.animator().alphaValue = 0
+        }
+    }
+
+    /// Runs the "in" leg: new text fades in and the artwork cross-dissolves at
+    /// the same moment, both over `transitionLeg`. If the artwork is not here
+    /// yet (timeout), only the text goes in; the artwork follows via the normal
+    /// polling path with the same duration.
+    func finishTrackTransition() {
+        guard transitionPending else { return }
+        transitionPending = false
+        if let t = pendingTitle, let a = pendingArtist {
+            titleMarquee.setText(t)
+            artistMarquee.setText(a)
+        }   // else: nothing new arrived; fade the unchanged text back in
+        if let art = pendingArtwork, let k = pendingKey {
+            setArtwork(art, animated: shownArtworkKey != nil)
+            shownArtworkKey = k
+        }
+        clearPending()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Self.transitionLeg
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            titleMarquee.animator().alphaValue = 1
+            artistMarquee.animator().alphaValue = 1
+        }
+        reconcileArtwork()
+    }
+
+    private func clearPending() {
+        transitionOldKey = nil
+        pendingKey = nil
+        pendingTitle = nil
+        pendingArtist = nil
+        pendingArtwork = nil
+        transitionReadyFired = false
+    }
+
+    /// Fallback when a track change arrives without `beginTrackTransition`.
     private func animateTextChange(to d: NowPlayingDetail) {
-        let half = 0.184
+        let half = Self.transitionLeg
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = half
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -333,7 +418,7 @@ final class NowPlayingPopoverController: NSViewController {
             let fade = CABasicAnimation(keyPath: "opacity")
             fade.fromValue = 1
             fade.toValue = 0
-            fade.duration = 0.1
+            fade.duration = Self.transitionLeg
             fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             fade.isRemovedOnCompletion = false
             fade.fillMode = .forwards
@@ -392,6 +477,8 @@ final class NowPlayingPopoverController: NSViewController {
         modesTickCount = 0
         modes = nil
         updateModeButtons()
+        transitionPending = false
+        clearPending()
         titleMarquee.alphaValue = 1
         artistMarquee.alphaValue = 1
     }

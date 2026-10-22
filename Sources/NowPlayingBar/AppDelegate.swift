@@ -39,7 +39,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var displayedTitle: String?
 
     private let fadeDuration: TimeInterval = 0.437  // show / hide
-    private let swapDuration: TimeInterval = 0.299  // each leg of track-change crossfade
+
+    /// Track-change crossfade: each leg is the card's transition leg so the
+    /// menu bar title and the card animate with the same duration.
+    private var transitionLeg: TimeInterval { NowPlayingPopoverController.transitionLeg }
+    private let transitionTimeout: TimeInterval = 1.0  // max wait for the card
+
+    // Pending track transition (see crossfade). The token invalidates older
+    // waits when a newer track starts or the title is hidden.
+    private var transitionToken = 0
+    private var transitionText: String?
+    private var transitionFadeOutDone = false
+    private var transitionAwaitsCard = false
+    private var transitionCardReady = false
+    private var transitionTimeoutItem: DispatchWorkItem?
 
     /// Gentle ease-in-out — eased at both ends for the softest start/stop.
     private var smoothCurve: CAMediaTimingFunction {
@@ -78,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         controls = NowPlayingPopoverController(monitor: monitor)
         controls.showsShuffleRepeat = prefs.showShuffleRepeat
+        controls.onTransitionReady = { [weak self] in self?.cardTransitionReady() }
 
         guard monitor.adapterExists else { return }
 
@@ -184,6 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controls.stopTicking()
         removeDismissMonitor()
         content.setHighlighted(false)
+        // A card hidden mid-transition must not stall the menu bar title.
+        if transitionAwaitsCard { cardTransitionReady() }
 
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.184
@@ -289,6 +305,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if let info = displayableInfo() {
             showTitle(displayString(for: info))
+            // Applies even when the text is unchanged (play ↔ pause toggle).
+            content.setPaused(!info.isPlaying)
         } else {
             hideTitle()
         }
@@ -321,33 +339,90 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Track changed while visible: fade the old title out, swap text + width,
-    /// then fade the new title in.
+    /// Track changed while visible: fade the old title out, then swap text +
+    /// width and fade the new title in. If the card is open, its transition
+    /// runs in lockstep: the title waits (up to 1.0 s) for the card's
+    /// "ready" signal so both fade in on the same run-loop turn.
     private func crossfade(to text: String) {
         displayedTitle = text
+        transitionToken += 1
+        let token = transitionToken
+        transitionTimeoutItem?.cancel()
+        transitionText = text
+        transitionFadeOutDone = false
+        transitionCardReady = false
+        transitionAwaitsCard = panelIsShown
+
+        if transitionAwaitsCard {
+            controls.beginTrackTransition()
+            let item = DispatchWorkItem { [weak self] in
+                // Stale if a newer transition began (token) — then ignore.
+                guard let self, self.transitionToken == token else { return }
+                self.cardTransitionReady()
+            }
+            transitionTimeoutItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + transitionTimeout, execute: item)
+        }
+
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = swapDuration
+            ctx.duration = transitionLeg
             ctx.timingFunction = smoothCurve
             content.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            guard let self, self.isShowing, self.displayedTitle == text else {
+            guard let self, self.isShowing, self.displayedTitle == text,
+                  self.transitionToken == token else {
                 // Hidden or superseded mid-fade — let the newer call own state.
                 return
             }
-            self.content.setTitle(text)
-            self.statusItem.length = self.content.fittingWidth()
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = self.swapDuration
-                ctx.timingFunction = self.smoothCurve
-                self.content.animator().alphaValue = 1
-            }
+            self.transitionFadeOutDone = true
+            self.completeTransitionIfReady()
         })
+    }
+
+    /// The card's new track is ready (or it was hidden / timed out).
+    private func cardTransitionReady() {
+        transitionCardReady = true
+        completeTransitionIfReady()
+    }
+
+    /// Fade-in once the title has faded out and (if the card is open) the
+    /// card is ready — swap text + length, fade in, and let the card fade in
+    /// in the same turn.
+    private func completeTransitionIfReady() {
+        guard transitionFadeOutDone, !transitionAwaitsCard || transitionCardReady,
+              isShowing, let text = transitionText, displayedTitle == text else { return }
+        let awaitsCard = transitionAwaitsCard
+        endTransition()
+
+        content.setTitle(text)
+        statusItem.length = content.fittingWidth()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = transitionLeg
+            ctx.timingFunction = smoothCurve
+            content.animator().alphaValue = 1
+        }
+        if awaitsCard { controls.finishTrackTransition() }
+    }
+
+    /// Clear pending transition state and invalidate any outstanding waits.
+    private func endTransition() {
+        transitionToken += 1
+        transitionTimeoutItem?.cancel()
+        transitionTimeoutItem = nil
+        transitionText = nil
+        transitionFadeOutDone = false
+        transitionAwaitsCard = false
+        transitionCardReady = false
     }
 
     private func hideTitle() {
         guard isShowing else { return }
         isShowing = false
         displayedTitle = nil
+        // Drop any pending track transition; don't leave the card faded out.
+        let cardWaiting = transitionAwaitsCard
+        endTransition()
+        if cardWaiting { controls.finishTrackTransition() }
 
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = fadeDuration

@@ -59,6 +59,7 @@ track from an enabled source is playing.
     - `Show artist` — append `— Artist` to the title.
     - `Show album` — append `— Album` to the title (after the artist, if shown).
     - `Hide when paused` — only show while actually playing.
+      While paused, the menu bar title is dimmed (visible when `Hide when paused` is off).
     - `Width` — titles wider than this scroll; shorter ones sit still. Narrow 120 ·
       Medium 176 · Wide 240 · Extra wide 320 pt, or `Custom…` (80–600 pt).
     - `Scroll speed` — Slow / Medium / Fast.
