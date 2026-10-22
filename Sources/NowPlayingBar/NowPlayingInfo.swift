@@ -45,6 +45,10 @@ struct NowPlayingDetail {
     var sampledAt: Date
     var artwork: NSImage?
     var sourceBundleID: String
+    /// `false` when the snapshot was self-contradictory (half-updated by the
+    /// OS right after a play/pause change) and had to be normalized; callers
+    /// should re-fetch shortly to pick up the settled values.
+    var isSettled: Bool = true
 
     /// Interpolated playback position at wall clock `now` — no IPC needed
     /// between fetches; we just advance `elapsedTime` by elapsed real time.
@@ -88,7 +92,31 @@ enum NowPlayingParser {
             artwork = NSImage(data: raw)
         }
 
-        let sampledAt = (p["timestamp"] as? String).flatMap { iso.date(from: $0) } ?? Date()
+        let receivedAt = Date()
+        let timestamp = (p["timestamp"] as? String).flatMap { iso.date(from: $0) } ?? Date()
+        let playing = (p["playing"] as? Bool) ?? false
+        var rate = (p["playbackRate"] as? NSNumber)?.doubleValue ?? 1
+        var elapsed = (p["elapsedTime"] as? NSNumber)?.doubleValue ?? 0
+        let duration = (p["duration"] as? NSNumber)?.doubleValue ?? 0
+        var sampledAt = timestamp
+        var settled = true
+
+        // Right after a play/pause change the adapter briefly reports a
+        // half-updated snapshot. Normalize it against the receive time.
+        if !playing && rate != 0 {
+            // Stale "still playing" values: freeze at the position reached now.
+            let advanced = elapsed + receivedAt.timeIntervalSince(timestamp) * rate
+            elapsed = duration > 0 ? min(max(advanced, 0), duration) : max(advanced, 0)
+            rate = 0
+            sampledAt = receivedAt
+            settled = false
+        } else if playing && rate == 0 {
+            // Stale "paused" values: resume from the reported position.
+            rate = 1
+            sampledAt = receivedAt
+            settled = false
+        }
+
         let parent = p["parentApplicationBundleIdentifier"] as? String
         let source = (parent?.isEmpty == false) ? parent! : bundleID
 
@@ -96,13 +124,14 @@ enum NowPlayingParser {
             title: title,
             artist: (p["artist"] as? String).flatMap { $0.isEmpty ? nil : $0 },
             album: (p["album"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-            isPlaying: (p["playing"] as? Bool) ?? false,
-            playbackRate: (p["playbackRate"] as? NSNumber)?.doubleValue ?? 1,
-            elapsedTime: (p["elapsedTime"] as? NSNumber)?.doubleValue ?? 0,
-            duration: (p["duration"] as? NSNumber)?.doubleValue ?? 0,
+            isPlaying: playing,
+            playbackRate: rate,
+            elapsedTime: elapsed,
+            duration: duration,
             sampledAt: sampledAt,
             artwork: artwork,
-            sourceBundleID: source
+            sourceBundleID: source,
+            isSettled: settled
         )
     }
 

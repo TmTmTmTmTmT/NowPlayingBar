@@ -57,6 +57,8 @@ final class NowPlayingPopoverController: NSViewController {
     /// Source's shuffle / repeat state (Music only); nil = unknown.
     private var modes: PlaybackModes?
     private var modesFetchInFlight = false
+    /// Pending confirm re-fetch (cancellable; at most one). See `scheduleConfirm`.
+    private var confirmItem: DispatchWorkItem?
     /// Duration of each leg (out / in) of a track change. Shared with the menu
     /// bar title so text and artwork transitions run in step.
     static let transitionLeg: TimeInterval = 0.25
@@ -148,7 +150,9 @@ final class NowPlayingPopoverController: NSViewController {
             if var d = self.detail {                 // optimistic local update
                 d.elapsedTime = seconds
                 d.sampledAt = Date()
+                d.isSettled = false                  // confirmed by a re-fetch
                 self.detail = d
+                self.scheduleConfirm(attempt: 0)
             }
         }
 
@@ -248,13 +252,32 @@ final class NowPlayingPopoverController: NSViewController {
     /// Apply a fresh snapshot. On a track change the title/artist crossfade and
     /// the artwork cross-dissolves; play/pause toggles and progress refreshes
     /// update instantly (no flashing).
-    func apply(_ d: NowPlayingDetail) {
+    func apply(_ d: NowPlayingDetail) { apply(d, confirmAttempt: nil) }
+
+    /// `confirmAttempt` is set when the snapshot comes from a confirm re-fetch.
+    private func apply(_ d: NowPlayingDetail, confirmAttempt: Int?) {
         _ = view   // force loadView() if needed
         let key = trackKey(d)
         let isTrackChange = (lastTrackKey != nil && key != lastTrackKey)
         if isTrackChange { artworkRetryCount = 0 }   // fresh budget per track
+        let previous = detail
         lastTrackKey = key
         detail = d
+        if isTrackChange {
+            cancelConfirm()   // track changes use the transition / artwork flow
+        } else if ticker != nil, let prev = previous {
+            // Same track: confirm unsettled snapshots and play / pause flips.
+            let flipped = prev.isPlaying != d.isPlaying
+            if !flipped && d.isSettled {
+                cancelConfirm()                                  // settled: chain ends
+            } else if flipped || confirmAttempt == nil {
+                scheduleConfirm(attempt: 0)                      // new change: 0.4 s
+            } else if let n = confirmAttempt, n < 1 {
+                scheduleConfirm(attempt: n + 1)                  // still unsettled: 1.2 s
+            } else {
+                cancelConfirm()                                  // budget spent
+            }
+        }
         if isTrackChange { fetchModes() }
 
         if transitionPending {
@@ -298,6 +321,28 @@ final class NowPlayingPopoverController: NSViewController {
         refreshProgress()
 
         reconcileArtwork()   // keep polling until the current track's art shows
+    }
+
+    /// Re-fetches the detail at 0.4 s (attempt 0) or 1.2 s after the change
+    /// (attempt 1, 0.8 s after the first). A new schedule replaces any pending one.
+    private func scheduleConfirm(attempt: Int) {
+        confirmItem?.cancel()
+        guard ticker != nil else { confirmItem = nil; return }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.ticker != nil else { return }
+            self.confirmItem = nil
+            self.monitor.fetchDetail { [weak self] d in
+                guard let self, let d, self.ticker != nil else { return }
+                self.apply(d, confirmAttempt: attempt)
+            }
+        }
+        confirmItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + (attempt == 0 ? 0.4 : 0.8), execute: item)
+    }
+
+    private func cancelConfirm() {
+        confirmItem?.cancel()
+        confirmItem = nil
     }
 
     /// If the displayed artwork doesn't match the current track yet (it arrives
@@ -468,6 +513,7 @@ final class NowPlayingPopoverController: NSViewController {
     func stopTicking() {
         ticker?.invalidate()
         ticker = nil
+        cancelConfirm()
         // Reset so the next open shows instantly; crossfades are for live
         // track changes while the panel is visible.
         lastTrackKey = nil
@@ -493,6 +539,7 @@ final class NowPlayingPopoverController: NSViewController {
             d.elapsedTime = d.position(at: Date())
             d.sampledAt = Date()
             d.isPlaying.toggle()
+            d.isSettled = false                   // confirmed by a re-fetch (apply schedules it)
             apply(d)
         }
     }
