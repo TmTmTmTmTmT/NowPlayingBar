@@ -360,6 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             showTitle(displayString(for: info))
             // Applies even when the text is unchanged (play ↔ pause toggle).
             content.setPaused(!info.isPlaying)
+            controls.setArtworkDimmed(!info.isPlaying)   // same moment and curve as the title
         } else {
             hideTitle()
         }

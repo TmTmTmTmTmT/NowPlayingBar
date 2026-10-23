@@ -231,6 +231,11 @@ final class NowPlayingPopoverController: NSViewController {
         // Full-height square artwork on the left.
         let art = h - pad * 2
         artworkGlass.frame = NSRect(x: pad, y: pad, width: art, height: art)
+        artworkView.layoutSubtreeIfNeeded()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        pauseVeil.frame = artworkView.bounds   // sublayer frames are not auto-resized
+        CATransaction.commit()
 
         // Right column.
         let rx = pad + art + 16
@@ -286,6 +291,28 @@ final class NowPlayingPopoverController: NSViewController {
     func apply(_ d: NowPlayingDetail) { apply(d, confirmAttempt: nil) }
 
     /// `confirmAttempt` is set when the snapshot comes from a confirm re-fetch.
+    /// Black veil over the cover while paused, matching the menu bar title dimming (0.5).
+    private let pauseVeil = CALayer()
+    func setArtworkDimmed(_ dimmed: Bool) {
+        guard let host = artworkView.layer else { return }
+        if pauseVeil.superlayer !== host {
+            pauseVeil.backgroundColor = NSColor.black.cgColor
+            pauseVeil.opacity = 0
+            pauseVeil.zPosition = 100
+            pauseVeil.frame = artworkView.bounds
+            host.addSublayer(pauseVeil)
+        }
+        let target: Float = dimmed ? 0.5 : 0
+        guard pauseVeil.opacity != target else { return }
+        let a = CABasicAnimation(keyPath: "opacity")
+        a.fromValue = pauseVeil.presentation()?.opacity ?? pauseVeil.opacity
+        a.toValue = target
+        a.duration = 0.3
+        a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        pauseVeil.add(a, forKey: "veil")
+        pauseVeil.opacity = target
+    }
+
     private func apply(_ d: NowPlayingDetail, confirmAttempt: Int?) {
         _ = view   // force loadView() if needed
         let key = trackKey(d)
@@ -294,6 +321,7 @@ final class NowPlayingPopoverController: NSViewController {
         let previous = detail
         lastTrackKey = key
         detail = d
+        setArtworkDimmed(!d.isPlaying)
         if isTrackChange {
             cancelConfirm()   // track changes use the transition / artwork flow
         } else if ticker != nil, let prev = previous {
