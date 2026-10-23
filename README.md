@@ -30,6 +30,19 @@ long titles **scroll slowly to the left (marquee)** to reveal the whole thing.
 - macOS 26 or later (Liquid Glass control card).
 - Xcode 26 or the Command Line Tools with the macOS 26 SDK (Swift 5.9+). No Homebrew.
 
+## Install with Homebrew
+
+```sh
+brew install TmTmTmTmTmT/tap/nowplayingbar
+open "$(brew --prefix)/opt/nowplayingbar/NowPlayingBar.app"
+```
+
+Homebrew builds it from source on your Mac, so it needs the Command Line Tools
+(`xcode-select --install`) and macOS 26 or later. To keep it in Applications:
+`cp -R "$(brew --prefix)/opt/nowplayingbar/NowPlayingBar.app" /Applications/`.
+Update with `brew upgrade nowplayingbar`, remove with `brew uninstall nowplayingbar`
+(your settings stay; delete them with `defaults delete com.local.nowplayingbar`).
+
 ## Build & run
 
 ```sh
