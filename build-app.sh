@@ -51,7 +51,9 @@ ln -sf Versions/Current/Resources "$FW/Resources"
 codesign --force --sign - "$FW" >/dev/null
 
 echo "==> [2/3] Building Swift executable (release)"
-swift build -c release --package-path "$ROOT"
+# SWIFT_BUILD_FLAGS: extra flags, e.g. --disable-sandbox when building inside Homebrew.
+# shellcheck disable=SC2086
+swift build -c release --package-path "$ROOT" ${SWIFT_BUILD_FLAGS:-}
 EXE="$ROOT/.build/release/NowPlayingBar"
 
 echo "==> [3/3] Assembling NowPlayingBar.app"
