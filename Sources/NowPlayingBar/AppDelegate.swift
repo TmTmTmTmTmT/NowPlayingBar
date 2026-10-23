@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// borderless glass panel (no popover arrow).
     private var panel: CardPanel?
     private var glassView: NSGlassEffectView?
+    private var blurView: NSVisualEffectView?   // menu-like frosted blur behind clear glass
     private var controls: NowPlayingPopoverController!
     private var dismissMonitor: Any?
     private var activationObserver: NSObjectProtocol?
@@ -249,6 +250,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         glass.cornerRadius = 22      // artwork radius 8 + inner padding 14
         glass.autoresizingMask = [.width, .height]
         glassView = glass
+
+        let blur = NSVisualEffectView(frame: bounds)
+        blur.material = .menu
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.autoresizingMask = [.width, .height]
+        blur.wantsLayer = true
+        blur.layer?.cornerRadius = 22
+        blur.layer?.cornerCurve = .continuous
+        blur.layer?.masksToBounds = true
+        blurView = blur
         applyGlassPrefs()
 
         let card = controls.view
@@ -256,16 +268,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         card.autoresizingMask = [.width, .height]
         glass.contentView = card
 
-        panel.contentView = glass
+        let root = NSView(frame: bounds)
+        root.addSubview(blur)
+        root.addSubview(glass)
+        panel.contentView = root
         return panel
     }
+
+    /// Clear glass look: very light tint, under-window blur, slightly see-through cover.
+    private static let clearTint: CGFloat = 0.14
+    private static let clearBlurOpacity: CGFloat = 0.40
+    private static let clearCoverOpacity: CGFloat = 0.75
 
     /// Apply the glass option to the live panel. Clear glass gets a very light
     /// tint that follows Light / Dark appearance (windowBackgroundColor is dynamic).
     private func applyGlassPrefs() {
         let clear = prefs.glassClear
         glassView?.style = clear ? .clear : .regular
-        glassView?.tintColor = clear ? NSColor.windowBackgroundColor.withAlphaComponent(0.18) : nil
+        glassView?.tintColor = clear
+            ? NSColor.windowBackgroundColor.withAlphaComponent(Self.clearTint) : nil
+        blurView?.material = .underWindowBackground
+        blurView?.alphaValue = Self.clearBlurOpacity
+        blurView?.isHidden = !clear
+        controls.artworkAlpha = clear && prefs.clearCoverFade ? Self.clearCoverOpacity : 1
     }
 
     // Dismiss the panel when focus leaves it:
@@ -539,9 +564,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sub.addItem(.separator())
 
         let glassItem = NSMenuItem(title: "Liquid Glass", action: nil, keyEquivalent: "")
-        glassItem.submenu = buildChoiceMenu(
-            choices: [("Regular", 0), ("Clear", 1)],
-            current: prefs.glassClear ? 1 : 0, action: #selector(setGlass(_:)))
+        let glassMenu = NSMenu.keepOpenChoices(
+            [("Regular", 0), ("Clear", 1)], current: prefs.glassClear ? 1 : 0
+        ) { [weak self] v in
+            guard let self else { return }
+            self.prefs.glassClear = v == 1; self.applyGlassPrefs()
+        }
+        glassMenu.addItem(.separator())
+        let fadeView = MenuChoiceView(title: "Clear: translucent cover (75%)")
+        fadeView.checked = prefs.clearCoverFade
+        fadeView.onSelect = { [weak self, unowned fadeView] in
+            guard let self else { return }
+            self.prefs.clearCoverFade.toggle()
+            fadeView.checked = self.prefs.clearCoverFade
+            self.applyGlassPrefs()
+        }
+        let fadeItem = NSMenuItem()
+        fadeItem.view = fadeView
+        glassMenu.addItem(fadeItem)
+        glassItem.submenu = glassMenu
         sub.addItem(glassItem)
 
         sub.addItem(.separator())
@@ -662,10 +703,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func setSpeed(_ sender: NSMenuItem) {
         guard let v = sender.representedObject as? Double else { return }
         prefs.scrollSpeed = CGFloat(v); updateDisplay()
-    }
-    @objc private func setGlass(_ sender: NSMenuItem) {
-        guard let v = sender.representedObject as? Double else { return }
-        prefs.glassClear = v >= 0.5; applyGlassPrefs()
     }
     @objc private func quit() { NSApp.terminate(nil) }
 }

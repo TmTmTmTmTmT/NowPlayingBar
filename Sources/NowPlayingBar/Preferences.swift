@@ -18,6 +18,7 @@ final class Preferences {
         static let maxWidth          = "maxWidth"
         static let showAlbum         = "showAlbum"
         static let showShuffleRepeat = "showShuffleRepeat"
+        static let clearCoverFade    = "clearCoverFade"
         static let glassClear        = "glassClear"
     }
 
@@ -70,6 +71,7 @@ final class Preferences {
             Key.maxWidth:          176.0,
             Key.showAlbum:         false,
             Key.showShuffleRepeat: false,
+            Key.clearCoverFade:    true,
             Key.glassClear:        false,
         ])
         if !defaults.bool(forKey: Key.firstRunDone) {
@@ -109,6 +111,12 @@ final class Preferences {
     var glassClear: Bool {
         get { defaults.bool(forKey: Key.glassClear) }
         set { defaults.set(newValue, forKey: Key.glassClear) }
+    }
+
+    /// With Clear glass, draw the album cover at 75% opacity (off = 100%).
+    var clearCoverFade: Bool {
+        get { defaults.bool(forKey: Key.clearCoverFade) }
+        set { defaults.set(newValue, forKey: Key.clearCoverFade) }
     }
 
     var showShuffleRepeat: Bool {

@@ -83,6 +83,11 @@ final class NowPlayingPopoverController: NSViewController {
 
     // MARK: UI
     private let artworkView   = ClickableImageView()
+    private let artworkGlass  = NSGlassEffectView()   // TEST: Liquid Glass wrapper around the artwork
+    /// Cover opacity (1 = opaque); lowered for the Clear glass look.
+    var artworkAlpha: CGFloat = 1 {
+        didSet { artworkGlass.alphaValue = artworkAlpha }
+    }
     private let titleMarquee  = MarqueeView(frame: .zero)
     private let artistMarquee = MarqueeView(frame: .zero)
     private let prevButton  = HighlightButton()
@@ -116,6 +121,8 @@ final class NowPlayingPopoverController: NSViewController {
         artworkView.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
         // Click the artwork to launch / focus the source app.
         artworkView.onClick = { [weak self] in self?.openSourceApp() }
+        artworkGlass.cornerRadius = 8
+        artworkGlass.contentView = artworkView
 
         // Title + artist scroll (marquee) when wider than their column.
         titleMarquee.font = .systemFont(ofSize: 13, weight: .bold)
@@ -167,7 +174,7 @@ final class NowPlayingPopoverController: NSViewController {
         [prevButton, playButton, nextButton, shuffleButton, repeatButton]
             .forEach(buttonRow.addSubview)
 
-        [artworkView, titleMarquee, artistMarquee, buttonRow, scrubBar, elapsedLabel,
+        [artworkGlass, titleMarquee, artistMarquee, buttonRow, scrubBar, elapsedLabel,
          remainingLabel].forEach(container.addSubview)
 
         view = container
@@ -199,7 +206,7 @@ final class NowPlayingPopoverController: NSViewController {
 
         // Full-height square artwork on the left.
         let art = h - pad * 2
-        artworkView.frame = NSRect(x: pad, y: pad, width: art, height: art)
+        artworkGlass.frame = NSRect(x: pad, y: pad, width: art, height: art)
 
         // Right column.
         let rx = pad + art + 16
