@@ -276,7 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Clear glass look: menu-material blur, slightly see-through cover.
-    private static let clearBlurOpacity: CGFloat = 0.50
+    private static let clearBlurOpacity: CGFloat = 0.58
     private static let clearCoverOpacity: CGFloat = 0.85
 
     /// Apply the glass option to the live panel.
