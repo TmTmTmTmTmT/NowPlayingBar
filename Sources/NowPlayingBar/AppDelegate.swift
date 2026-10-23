@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Left-click control card (artwork + transport + scrubber), hosted in a
     /// borderless glass panel (no popover arrow).
     private var panel: CardPanel?
+    private var glassView: NSGlassEffectView?
     private var controls: NowPlayingPopoverController!
     private var dismissMonitor: Any?
     private var activationObserver: NSObjectProtocol?
@@ -244,9 +245,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // One system Liquid Glass surface; the card is its content view.
         let bounds = NSRect(origin: .zero, size: size)
         let glass = NSGlassEffectView(frame: bounds)
-        glass.style = .regular       // legibility first
         glass.tintColor = nil
         glass.cornerRadius = 22      // artwork radius 8 + inner padding 14
+        glass.autoresizingMask = [.width, .height]
+        glassView = glass
+        applyGlassPrefs()
 
         let card = controls.view
         card.frame = bounds
@@ -255,6 +258,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         panel.contentView = glass
         return panel
+    }
+
+    /// Apply the glass option to the live panel. Clear glass gets a very light
+    /// tint that follows Light / Dark appearance (windowBackgroundColor is dynamic).
+    private func applyGlassPrefs() {
+        let clear = prefs.glassClear
+        glassView?.style = clear ? .clear : .regular
+        glassView?.tintColor = clear ? NSColor.windowBackgroundColor.withAlphaComponent(0.12) : nil
     }
 
     // Dismiss the panel when focus leaves it:
@@ -527,6 +538,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         sub.addItem(.separator())
 
+        let glassItem = NSMenuItem(title: "Liquid Glass", action: nil, keyEquivalent: "")
+        glassItem.submenu = buildChoiceMenu(
+            choices: [("Regular", 0), ("Clear", 1)],
+            current: prefs.glassClear ? 1 : 0, action: #selector(setGlass(_:)))
+        sub.addItem(glassItem)
+
+        sub.addItem(.separator())
+
         let shuffleRepeat = NSMenuItem(title: "Show shuffle & repeat",
                                        action: #selector(toggleShowShuffleRepeat), keyEquivalent: "")
         shuffleRepeat.target = self
@@ -643,6 +662,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func setSpeed(_ sender: NSMenuItem) {
         guard let v = sender.representedObject as? Double else { return }
         prefs.scrollSpeed = CGFloat(v); updateDisplay()
+    }
+    @objc private func setGlass(_ sender: NSMenuItem) {
+        guard let v = sender.representedObject as? Double else { return }
+        prefs.glassClear = v >= 0.5; applyGlassPrefs()
     }
     @objc private func quit() { NSApp.terminate(nil) }
 }

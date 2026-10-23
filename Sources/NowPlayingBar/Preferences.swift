@@ -18,6 +18,7 @@ final class Preferences {
         static let maxWidth          = "maxWidth"
         static let showAlbum         = "showAlbum"
         static let showShuffleRepeat = "showShuffleRepeat"
+        static let glassClear        = "glassClear"
     }
 
     /// Width menu presets (points).
@@ -69,6 +70,7 @@ final class Preferences {
             Key.maxWidth:          176.0,
             Key.showAlbum:         false,
             Key.showShuffleRepeat: false,
+            Key.glassClear:        false,
         ])
         if !defaults.bool(forKey: Key.firstRunDone) {
             defaults.set(true,  forKey: Key.firstRunDone)
@@ -101,6 +103,12 @@ final class Preferences {
     var showAlbum: Bool {
         get { defaults.bool(forKey: Key.showAlbum) }
         set { defaults.set(newValue, forKey: Key.showAlbum) }
+    }
+
+    /// Card glass: false = regular, true = clear (with a very light tint).
+    var glassClear: Bool {
+        get { defaults.bool(forKey: Key.glassClear) }
+        set { defaults.set(newValue, forKey: Key.glassClear) }
     }
 
     var showShuffleRepeat: Bool {
