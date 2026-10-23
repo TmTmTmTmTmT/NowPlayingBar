@@ -265,7 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func applyGlassPrefs() {
         let clear = prefs.glassClear
         glassView?.style = clear ? .clear : .regular
-        glassView?.tintColor = clear ? NSColor.windowBackgroundColor.withAlphaComponent(0.12) : nil
+        glassView?.tintColor = clear ? NSColor.windowBackgroundColor.withAlphaComponent(0.18) : nil
     }
 
     // Dismiss the panel when focus leaves it:
