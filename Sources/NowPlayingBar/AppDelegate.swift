@@ -305,7 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         blurView?.appearance = pinned
         blurView?.material = .menu
         blurView?.alphaValue = Self.clearBlurOpacity
-        blurView?.isHidden = !clear
+        blurView?.isHidden = !clear || prefs.clearNoBlur
         controls.solidElements = clear
         controls.artworkAlpha = clear && prefs.clearCoverFade ? Self.clearCoverOpacity : 1
     }
@@ -599,6 +599,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let fadeItem = NSMenuItem()
         fadeItem.view = fadeView
         glassMenu.addItem(fadeItem)
+        let noBlurView = MenuChoiceView(title: "Clear: no blur (plain glass)")
+        noBlurView.checked = prefs.clearNoBlur
+        noBlurView.onSelect = { [weak self, unowned noBlurView] in
+            guard let self else { return }
+            self.prefs.clearNoBlur.toggle()
+            noBlurView.checked = self.prefs.clearNoBlur
+            self.applyGlassPrefs()
+        }
+        let noBlurItem = NSMenuItem()
+        noBlurItem.view = noBlurView
+        glassMenu.addItem(noBlurItem)
         glassItem.submenu = glassMenu
         sub.addItem(glassItem)
 

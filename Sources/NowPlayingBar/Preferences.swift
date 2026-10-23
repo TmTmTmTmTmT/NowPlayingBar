@@ -19,6 +19,7 @@ final class Preferences {
         static let showAlbum         = "showAlbum"
         static let showShuffleRepeat = "showShuffleRepeat"
         static let clearCoverFade    = "clearCoverFade"
+        static let clearNoBlur       = "clearNoBlur"
         static let glassClear        = "glassClear"
     }
 
@@ -117,6 +118,12 @@ final class Preferences {
     var clearCoverFade: Bool {
         get { defaults.bool(forKey: Key.clearCoverFade) }
         set { defaults.set(newValue, forKey: Key.clearCoverFade) }
+    }
+
+    /// With Clear glass, drop the background blur too (plain clear glass).
+    var clearNoBlur: Bool {
+        get { defaults.bool(forKey: Key.clearNoBlur) }
+        set { defaults.set(newValue, forKey: Key.clearNoBlur) }
     }
 
     var showShuffleRepeat: Bool {

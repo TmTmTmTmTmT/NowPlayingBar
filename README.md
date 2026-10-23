@@ -69,7 +69,7 @@ open build/NowPlayingBar.app
     - `Hide when paused` — 실제로 재생 중일 때만 표시합니다. 끄면 일시정지 중에는 제목이 흐리게 보입니다.
     - `Width` — 이 너비보다 긴 제목은 흐르고, 짧으면 멈춰 있습니다. Narrow 120 · Medium 176 · Wide 240 · Extra wide 320 pt, 또는 `Custom…`(80~600pt).
     - `Scroll speed` — Slow / Medium / Fast.
-    - `Liquid Glass` — `Regular` / `Clear` 중 선택하고, 아래 항목으로 Clear일 때 앨범 커버를 85%로 투명하게 할지 정합니다. 선택해도 메뉴가 닫히지 않습니다.
+    - `Liquid Glass` — `Regular` / `Clear` 중 선택하고, 아래 두 항목으로 Clear일 때 앨범 커버를 85%로 투명하게 할지, 뒤 화면 블러를 없애 순수한 투명 유리로 할지 정합니다. 선택해도 메뉴가 닫히지 않습니다.
     - `Show shuffle & repeat` — 컨트롤 카드에 셔플·반복 버튼을 추가합니다(카드 너비가 320에서 360pt로 늘어남). 각 버튼은 재생 앱에 토글 명령을 보냅니다. Apple Music은 현재 상태도 표시하며, 파란색은 켜짐, `repeat.1` 아이콘은 한 곡 반복입니다. 다른 앱은 상태를 표시하지 않습니다.
   - **Quit** (⌘Q)
 
