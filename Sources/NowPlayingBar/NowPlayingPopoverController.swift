@@ -85,11 +85,11 @@ final class NowPlayingPopoverController: NSViewController {
     private let artworkView   = ClickableImageView()
     private let titleMarquee  = MarqueeView(frame: .zero)
     private let artistMarquee = MarqueeView(frame: .zero)
-    private let prevButton  = NSButton()
-    private let playButton  = NSButton()
-    private let nextButton  = NSButton()
-    private let shuffleButton = NSButton()
-    private let repeatButton  = NSButton()
+    private let prevButton  = HighlightButton()
+    private let playButton  = HighlightButton()
+    private let nextButton  = HighlightButton()
+    private let shuffleButton = HighlightButton()
+    private let repeatButton  = HighlightButton()
     /// Holds all five buttons, placed directly in the card (no glass).
     private let buttonRow   = NSView()
     private let scrubBar    = ScrubBar()
@@ -514,6 +514,7 @@ final class NowPlayingPopoverController: NSViewController {
         ticker?.invalidate()
         ticker = nil
         cancelConfirm()
+        [prevButton, playButton, nextButton, shuffleButton, repeatButton].forEach { $0.resetState() }
         // Reset so the next open shows instantly; crossfades are for live
         // track changes while the panel is visible.
         lastTrackKey = nil
