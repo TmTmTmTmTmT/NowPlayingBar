@@ -10,7 +10,9 @@
 
 ![메뉴 막대 위젯](docs/menubar.png)
 
-![컨트롤 카드](docs/card.png)
+![컨트롤 카드 (Regular)](docs/card.png)
+
+![컨트롤 카드 (Clear)](docs/card-clear.png)
 
 ## 기능
 
