@@ -84,6 +84,21 @@ final class NowPlayingPopoverController: NSViewController {
     // MARK: UI
     private let artworkView   = ClickableImageView()
     private let artworkGlass  = NSGlassEffectView()   // TEST: Liquid Glass wrapper around the artwork
+    /// Clear glass look: transport icons and secondary text are drawn more solid.
+    var solidElements = false {
+        didSet { applyElementColors() }
+    }
+    private var primaryColor: NSColor { solidElements ? NSColor.labelColor.withAlphaComponent(1) : .labelColor }
+    private var secondaryColor: NSColor { solidElements ? NSColor.labelColor.withAlphaComponent(0.8) : .secondaryLabelColor }
+
+    private func applyElementColors() {
+        [prevButton, playButton, nextButton].forEach { $0.contentTintColor = primaryColor }
+        titleMarquee.baseColor = primaryColor
+        artistMarquee.baseColor = secondaryColor
+        [elapsedLabel, remainingLabel].forEach { $0.textColor = secondaryColor }
+        updateModeButtons()
+    }
+
     /// Cover opacity (1 = opaque); lowered for the Clear glass look.
     var artworkAlpha: CGFloat = 1 {
         didSet { artworkGlass.alphaValue = artworkAlpha }
@@ -178,6 +193,7 @@ final class NowPlayingPopoverController: NSViewController {
          remainingLabel].forEach(container.addSubview)
 
         view = container
+        applyElementColors()   // honors the Clear look if it was set before the view loaded
     }
 
     private func configure(_ button: NSButton, symbol: String, point: CGFloat, action: Selector) {
@@ -194,7 +210,7 @@ final class NowPlayingPopoverController: NSViewController {
 
     /// Shuffle / repeat "on" look: accent icon color (off = secondary label).
     private func setActive(_ button: NSButton, _ on: Bool) {
-        button.contentTintColor = on ? .controlAccentColor : .secondaryLabelColor
+        button.contentTintColor = on ? .controlAccentColor : secondaryColor
     }
 
     // MARK: - Layout (explicit frames; card size is fixed)

@@ -275,21 +275,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return panel
     }
 
-    /// Clear glass look: very light tint, under-window blur, slightly see-through cover.
-    private static let clearTint: CGFloat = 0.14
-    private static let clearBlurOpacity: CGFloat = 0.40
-    private static let clearCoverOpacity: CGFloat = 0.75
+    /// Clear glass look: menu-material blur, slightly see-through cover.
+    private static let clearBlurOpacity: CGFloat = 0.50
+    private static let clearCoverOpacity: CGFloat = 0.85
 
-    /// Apply the glass option to the live panel. Clear glass gets a very light
-    /// tint that follows Light / Dark appearance (windowBackgroundColor is dynamic).
+    /// Apply the glass option to the live panel.
     private func applyGlassPrefs() {
         let clear = prefs.glassClear
         glassView?.style = clear ? .clear : .regular
-        glassView?.tintColor = clear
-            ? NSColor.windowBackgroundColor.withAlphaComponent(Self.clearTint) : nil
-        blurView?.material = .underWindowBackground
+        blurView?.material = .menu
         blurView?.alphaValue = Self.clearBlurOpacity
         blurView?.isHidden = !clear
+        controls.solidElements = clear
         controls.artworkAlpha = clear && prefs.clearCoverFade ? Self.clearCoverOpacity : 1
     }
 
@@ -571,7 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.prefs.glassClear = v == 1; self.applyGlassPrefs()
         }
         glassMenu.addItem(.separator())
-        let fadeView = MenuChoiceView(title: "Clear: translucent cover (75%)")
+        let fadeView = MenuChoiceView(title: "Clear: translucent cover (85%)")
         fadeView.checked = prefs.clearCoverFade
         fadeView.onSelect = { [weak self, unowned fadeView] in
             guard let self else { return }
