@@ -88,8 +88,16 @@ final class NowPlayingPopoverController: NSViewController {
     var solidElements = false {
         didSet { applyElementColors() }
     }
-    private var primaryColor: NSColor { solidElements ? NSColor.labelColor.withAlphaComponent(1) : .labelColor }
-    private var secondaryColor: NSColor { solidElements ? NSColor.labelColor.withAlphaComponent(0.8) : .secondaryLabelColor }
+    /// White on dark, black on light, resolved per view appearance (the Clear glass
+    /// pins the card's appearance to the system's Light / Dark setting).
+    private static func solidColor(alpha: CGFloat) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return (dark ? NSColor.white : NSColor.black).withAlphaComponent(alpha)
+        }
+    }
+    private var primaryColor: NSColor { solidElements ? Self.solidColor(alpha: 1) : .labelColor }
+    private var secondaryColor: NSColor { solidElements ? Self.solidColor(alpha: 0.8) : .secondaryLabelColor }
 
     private func applyElementColors() {
         [prevButton, playButton, nextButton].forEach { $0.contentTintColor = primaryColor }

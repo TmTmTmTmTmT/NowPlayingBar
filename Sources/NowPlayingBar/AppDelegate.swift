@@ -71,6 +71,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - App lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            // Re-pin right away and once more after the system has settled.
+            self?.applyGlassPrefs()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.applyGlassPrefs() }
+        }
         statusItem = NSStatusBar.system.statusItem(withLength: 0)
         guard let button = statusItem.button else { return }
 
@@ -280,9 +288,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let clearCoverOpacity: CGFloat = 0.85
 
     /// Apply the glass option to the live panel.
+    /// Current system Light / Dark setting. The global preference updates before
+    /// `NSApp.effectiveAppearance` does, so it is the reliable source right after a switch.
+    private static func systemIsDark() -> Bool {
+        UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+    }
+
     private func applyGlassPrefs() {
         let clear = prefs.glassClear
         glassView?.style = clear ? .clear : .regular
+        // Clear glass forces a dark look on its content; follow the system
+        // Light / Dark setting instead so text stays readable in Light mode.
+        let systemDark = Self.systemIsDark()
+        let pinned = clear ? NSAppearance(named: systemDark ? .darkAqua : .aqua) : nil
+        glassView?.appearance = pinned
+        blurView?.appearance = pinned
         blurView?.material = .menu
         blurView?.alphaValue = Self.clearBlurOpacity
         blurView?.isHidden = !clear
