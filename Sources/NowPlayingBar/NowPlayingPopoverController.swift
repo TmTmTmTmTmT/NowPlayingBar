@@ -103,7 +103,7 @@ final class NowPlayingPopoverController: NSViewController {
         [prevButton, playButton, nextButton].forEach { $0.contentTintColor = primaryColor }
         titleMarquee.baseColor = primaryColor
         artistMarquee.baseColor = secondaryColor
-        [elapsedLabel, remainingLabel].forEach { $0.textColor = secondaryColor }
+        [elapsedLabel, remainingLabel].forEach { $0.textColor = Self.solidColor(alpha: 0.8) }  // same in Regular and Clear
         updateModeButtons()
     }
 
@@ -189,7 +189,7 @@ final class NowPlayingPopoverController: NSViewController {
         let timeFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         for label in [elapsedLabel, remainingLabel] {
             label.font = timeFont
-            label.textColor = .secondaryLabelColor  // match artist/album
+            label.textColor = Self.solidColor(alpha: 0.8)  // see applyElementColors
         }
         remainingLabel.alignment = .right
 
