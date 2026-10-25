@@ -18,6 +18,11 @@ final class NowPlayingMonitor {
 
     var onUpdate: ((NowPlayingInfo?) -> Void)?
 
+    /// Lyrics add-on feed. Parsed only while `wantsTimeline` is set so the
+    /// menu bar path costs nothing extra when lyrics are off.
+    var wantsTimeline = false
+    var onTimeline: ((TimelineSample) -> Void)?
+
     init(scriptURL: URL, frameworkURL: URL) {
         self.scriptURL = scriptURL
         self.frameworkURL = frameworkURL
@@ -48,7 +53,7 @@ final class NowPlayingMonitor {
         process.executableURL = perlURL
         process.arguments = [
             scriptURL.path, frameworkURL.path,
-            "stream", "--no-diff", "--no-artwork", "--debounce=150"
+            "stream", "--no-diff", "--no-artwork", "--micros", "--debounce=150"
         ]
 
         let out = Pipe()
@@ -88,6 +93,9 @@ final class NowPlayingMonitor {
             guard !lineSlice.isEmpty else { continue }
             let info = NowPlayingParser.parse(lineSlice)
             DispatchQueue.main.async { [weak self] in self?.onUpdate?(info) }
+            if wantsTimeline, let sample = NowPlayingParser.parseTimeline(lineSlice) {
+                DispatchQueue.main.async { [weak self] in self?.onTimeline?(sample) }
+            }
         }
         // Compact once the consumed prefix grows large to reclaim memory.
         if bufferStart > 8_192 {
@@ -128,7 +136,7 @@ final class NowPlayingMonitor {
     func fetchDetail(_ completion: @escaping (NowPlayingDetail?) -> Void) {
         let process = Process()
         process.executableURL = perlURL
-        process.arguments = [scriptURL.path, frameworkURL.path, "get"]
+        process.arguments = [scriptURL.path, frameworkURL.path, "get", "--micros"]
         let out = Pipe()
         process.standardOutput = out
         process.standardError = Pipe()

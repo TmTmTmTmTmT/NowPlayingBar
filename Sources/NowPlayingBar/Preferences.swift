@@ -1,4 +1,5 @@
 import AppKit
+import FloatingLyric
 
 /// Persists user choices: which sources to show, display options, and the
 /// marquee geometry. Backed by `UserDefaults`.
@@ -21,6 +22,7 @@ final class Preferences {
         static let clearCoverFade    = "clearCoverFade"
         static let clearNoBlur       = "clearNoBlur"
         static let glassClear        = "glassClear"
+        static let cardMode          = "cardMode"
     }
 
     /// Width menu presets (points).
@@ -74,6 +76,7 @@ final class Preferences {
             Key.showShuffleRepeat: false,
             Key.clearCoverFade:    true,
             Key.glassClear:        false,
+            Key.cardMode:          0,
         ])
         if !defaults.bool(forKey: Key.firstRunDone) {
             defaults.set(true,  forKey: Key.firstRunDone)
@@ -120,10 +123,18 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.clearCoverFade) }
     }
 
+
     /// With Clear glass, drop the background blur too (plain clear glass).
     var clearNoBlur: Bool {
         get { defaults.bool(forKey: Key.clearNoBlur) }
         set { defaults.set(newValue, forKey: Key.clearNoBlur) }
+    }
+
+    /// Card behavior: 0 = on click (default), 1 = always shown while playback
+    /// info exists, 2 = always shown with the lyrics attached below it.
+    var cardMode: Int {
+        get { min(max(defaults.integer(forKey: Key.cardMode), 0), 2) }
+        set { defaults.set(min(max(newValue, 0), 2), forKey: Key.cardMode) }
     }
 
     var showShuffleRepeat: Bool {

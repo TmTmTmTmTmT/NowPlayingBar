@@ -291,7 +291,7 @@ final class NowPlayingPopoverController: NSViewController {
     func apply(_ d: NowPlayingDetail) { apply(d, confirmAttempt: nil) }
 
     /// `confirmAttempt` is set when the snapshot comes from a confirm re-fetch.
-    /// Black veil over the cover while paused, matching the menu bar title dimming (0.5).
+    /// Black veil over the cover while paused; lighter (0.25) than the menu bar title dimming (0.5).
     private let pauseVeil = CALayer()
     func setArtworkDimmed(_ dimmed: Bool) {
         guard let host = artworkView.layer else { return }
@@ -302,7 +302,7 @@ final class NowPlayingPopoverController: NSViewController {
             pauseVeil.frame = artworkView.bounds
             host.addSublayer(pauseVeil)
         }
-        let target: Float = dimmed ? 0.5 : 0
+        let target: Float = dimmed ? 0.25 : 0
         guard pauseVeil.opacity != target else { return }
         let a = CABasicAnimation(keyPath: "opacity")
         a.fromValue = pauseVeil.presentation()?.opacity ?? pauseVeil.opacity

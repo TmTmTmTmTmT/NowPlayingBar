@@ -1,4 +1,5 @@
 import AppKit
+import FloatingLyric
 import Foundation
 
 /// A snapshot of the system's "Now Playing" state, decoded from the
@@ -60,6 +61,15 @@ struct NowPlayingDetail {
     }
 }
 
+/// One stream line reduced to what the lyrics add-on needs.
+struct TimelineSample {
+    var timeline: PlaybackTimeline
+    var sourceBundleID: String
+    var title: String
+    var artist: String?
+    var album: String?
+}
+
 /// Parses one line of adapter output (either a `get` payload or a `stream`
 /// envelope) into a `NowPlayingInfo`. Returns `nil` when nothing is playing.
 enum NowPlayingParser {
@@ -79,6 +89,22 @@ enum NowPlayingParser {
         return top
     }
 
+    /// Time fields of a payload. With the adapter's `--micros` flag the keys
+    /// are `elapsedTimeMicros` / `durationMicros` / `timestampEpochMicros`
+    /// (timestamp keeps its sub-second part); without it they are seconds and
+    /// an ISO8601 string truncated to whole seconds. Micros keys win.
+    private static func timeFields(_ p: [String: Any], fallbackNow: Date)
+        -> (elapsed: Double, duration: Double, timestamp: Date) {
+        let elapsed = (p["elapsedTimeMicros"] as? NSNumber).map { $0.doubleValue / 1_000_000 }
+            ?? (p["elapsedTime"] as? NSNumber)?.doubleValue ?? 0
+        let duration = (p["durationMicros"] as? NSNumber).map { $0.doubleValue / 1_000_000 }
+            ?? (p["duration"] as? NSNumber)?.doubleValue ?? 0
+        let timestamp = (p["timestampEpochMicros"] as? NSNumber)
+            .map { Date(timeIntervalSince1970: $0.doubleValue / 1_000_000) }
+            ?? (p["timestamp"] as? String).flatMap { iso.date(from: $0) } ?? fallbackNow
+        return (elapsed, duration, timestamp)
+    }
+
     /// Full snapshot incl. artwork + timeline, for the control popover.
     static func parseDetail(_ data: Data) -> NowPlayingDetail? {
         guard let p = payload(from: data),
@@ -93,11 +119,10 @@ enum NowPlayingParser {
         }
 
         let receivedAt = Date()
-        let timestamp = (p["timestamp"] as? String).flatMap { iso.date(from: $0) } ?? Date()
+        let (parsedElapsed, duration, timestamp) = timeFields(p, fallbackNow: receivedAt)
         let playing = (p["playing"] as? Bool) ?? false
         var rate = (p["playbackRate"] as? NSNumber)?.doubleValue ?? 1
-        var elapsed = (p["elapsedTime"] as? NSNumber)?.doubleValue ?? 0
-        let duration = (p["duration"] as? NSNumber)?.doubleValue ?? 0
+        var elapsed = parsedElapsed
         var sampledAt = timestamp
         var settled = true
 
@@ -133,6 +158,43 @@ enum NowPlayingParser {
             sourceBundleID: source,
             isSettled: settled
         )
+    }
+
+    /// Timeline + track identity for the lyrics add-on. Same envelope and
+    /// half-updated-snapshot normalization as `parseDetail`, without artwork.
+    static func parseTimeline(_ data: Data) -> TimelineSample? {
+        guard let p = payload(from: data),
+              let title = p["title"] as? String, !title.isEmpty,
+              let bundleID = p["bundleIdentifier"] as? String
+        else { return nil }
+
+        let receivedAt = Date()
+        let (parsedElapsed, duration, timestamp) = timeFields(p, fallbackNow: receivedAt)
+        let playing = (p["playing"] as? Bool) ?? false
+        var rate = (p["playbackRate"] as? NSNumber)?.doubleValue ?? 1
+        var elapsed = parsedElapsed
+        var sampledAt = timestamp
+
+        if !playing && rate != 0 {
+            let advanced = elapsed + receivedAt.timeIntervalSince(timestamp) * rate
+            elapsed = duration > 0 ? min(max(advanced, 0), duration) : max(advanced, 0)
+            rate = 0
+            sampledAt = receivedAt
+        } else if playing && rate == 0 {
+            rate = 1
+            sampledAt = receivedAt
+        }
+
+        let parent = p["parentApplicationBundleIdentifier"] as? String
+        let source = (parent?.isEmpty == false) ? parent! : bundleID
+
+        return TimelineSample(
+            timeline: PlaybackTimeline(elapsed: elapsed, timestamp: sampledAt, rate: rate,
+                                       duration: duration, isPlaying: playing),
+            sourceBundleID: source,
+            title: title,
+            artist: (p["artist"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+            album: (p["album"] as? String).flatMap { $0.isEmpty ? nil : $0 })
     }
 
     static func parse(_ data: Data) -> NowPlayingInfo? {

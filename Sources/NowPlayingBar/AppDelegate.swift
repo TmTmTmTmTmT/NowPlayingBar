@@ -1,8 +1,10 @@
 import AppKit
+import FloatingLyric
 
 /// Borderless panel that can become key without activating the app — glass
-/// buttons render dimmed in a non-key window.
-final class CardPanel: NSPanel {
+/// buttons render dimmed in a non-key window. `ActiveGlassPanel` keeps the
+/// glass rim highlight when the card stays up while another app is active.
+final class CardPanel: ActiveGlassPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }
@@ -21,16 +23,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// borderless glass panel (no popover arrow).
     private var panel: CardPanel?
     private var glassView: NSGlassEffectView?
+    private var dimView: NSView?
     private var blurView: NSVisualEffectView?   // menu-like frosted blur behind clear glass
     private var controls: NowPlayingPopoverController!
     private var dismissMonitor: Any?
     private var activationObserver: NSObjectProtocol?
     private var panelIsShown: Bool { panel?.isVisible ?? false }
 
+    // Card modes (Preferences.cardMode). `cardActive` is the logical state:
+    // true from the moment a show begins until a hide begins (`panelIsShown`
+    // stays true during the fade-out).
+    private var cardActive = false
+    private var cardShowPending = false
+    private var cardAutoRetries = 0
+    /// Always-shown modes: user hid the card via the widget; not persisted.
+    private var cardTemporarilyHidden = false
+    private var cardFollowItem: DispatchWorkItem?
+    private var isAlwaysShown: Bool { prefs.cardMode != 0 }
+    /// Lyrics are on, either by preference or forced by "Always shown with Lyrics Card".
+    private var lyricsActive: Bool { lyricPrefs.enabled || prefs.cardMode == 2 }
+
     /// Fade-in target (the glass has its own translucency).
     private let panelAlpha: CGFloat = 1.0
 
     private var current: NowPlayingInfo?
+
+    /// Lyrics add-on. Fed from the same filtered state as the menu bar title.
+    private var lyrics: FloatingLyricController?
+    private weak var observedStatusWindow: NSWindow?
+    private var statusWindowObservers: [NSObjectProtocol] = []
+    private var statusMoveScheduled = false
+    private let lyricPrefs = LyricPreferences.shared
+    /// Last track sent to the add-on (dedupes; its duration may arrive late).
+    private var lyricsTrack: TrackRef?
+    /// Identity + duration of the latest timeline sample, so a stale duration
+    /// from the previous track is never attached to a new one.
+    private var lastSampleKey: (title: String, source: String)?
+    private var lastSampleDuration: TimeInterval = 0
 
     /// Tracks whether the title is currently visible (or animating in).
     /// Guards against redundant show/hide calls.
@@ -103,13 +132,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controls.showsShuffleRepeat = prefs.showShuffleRepeat
         controls.onTransitionReady = { [weak self] in self?.cardTransitionReady() }
 
+        lyrics = FloatingLyricController(host: LyricHost(
+            seek: { [weak self] in self?.monitor.seek(to: $0) },
+            statusItemFrame: { [weak self] in
+                guard let b = self?.statusItem.button, let w = b.window else { return nil }
+                return w.convertToScreen(b.convert(b.bounds, to: nil))
+            }))
+        lyrics?.setForcedCardAttachment(prefs.cardMode == 2)
+        observeStatusItemWindow()
+        applyGlassPrefs()
+
         guard monitor.adapterExists else { return }
 
         monitor.onUpdate = { [weak self] info in self?.handleUpdate(info) }
+        monitor.wantsTimeline = lyricsActive
+        monitor.onTimeline = { [weak self] sample in self?.handleTimeline(sample) }
         monitor.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        lyrics?.setForcedCardAttachment(false)
         monitor.stop()
     }
 
@@ -133,6 +175,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let info { prefs.recordDiscovered(id: info.sourceBundleID) }
         updateDisplay()
         if panelIsShown { refreshPanel() }   // track/play change → refresh card
+        syncLyricsTrack()
+    }
+
+    // MARK: - Lyrics feed
+
+    /// Sends the filtered current track to the add-on (only when it changed).
+    private func syncLyricsTrack(force: Bool = false) {
+        var ref: TrackRef?
+        if let info = current, prefs.shouldDisplay(info.sourceBundleID) {
+            let known = lastSampleKey.map { $0 == (info.title, info.sourceBundleID) } ?? false
+            ref = TrackRef(title: info.title, artist: info.artist, album: info.album,
+                           duration: known ? lastSampleDuration : 0,
+                           sourceBundleID: info.sourceBundleID)
+        }
+        guard force || ref != lyricsTrack else { return }
+        lyricsTrack = ref
+        lyrics?.update(track: ref)
+    }
+
+    private func handleTimeline(_ sample: TimelineSample) {
+        // Same source filter as handleUpdate; ignore samples of other tracks.
+        if prefs.filterEnabled, !prefs.shouldDisplay(sample.sourceBundleID) { return }
+        guard let info = current, info.title == sample.title,
+              info.sourceBundleID == sample.sourceBundleID else { return }
+
+        lastSampleKey = (sample.title, sample.sourceBundleID)
+        lastSampleDuration = sample.timeline.duration
+        // Duration appeared after the track was announced → re-send once.
+        if sample.timeline.duration > 0, var t = lyricsTrack, t.duration == 0 {
+            t.duration = sample.timeline.duration
+            lyricsTrack = t
+            lyrics?.update(track: t)
+        }
+        lyrics?.update(timeline: sample.timeline)
+    }
+
+    /// Lyrics were just switched on: the stream only speaks on changes, so
+    /// fetch one snapshot to get position + duration right away.
+    private func primeLyricsTimeline() {
+        monitor.fetchDetail { [weak self] d in
+            guard let self, let d, self.lyricsActive else { return }
+            self.handleTimeline(TimelineSample(
+                timeline: PlaybackTimeline(elapsed: d.elapsedTime, timestamp: d.sampledAt,
+                                           rate: d.playbackRate, duration: d.duration,
+                                           isPlaying: d.isPlaying),
+                sourceBundleID: d.sourceBundleID, title: d.title,
+                artist: d.artist, album: d.album))
+        }
     }
 
     // MARK: - Click routing
@@ -142,7 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let isRight = event?.type == .rightMouseUp
             || (event?.modifierFlags.contains(.control) ?? false)
         if isRight {
-            if panelIsShown { hidePanel() }
+            if panelIsShown && !isAlwaysShown { hidePanel() }
             showMenu()
         } else {
             togglePanel()
@@ -157,13 +247,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Control panel
 
     private func togglePanel() {
+        if isAlwaysShown {
+            // Temporary hide / show; forgotten on the next launch.
+            if cardActive {
+                cardTemporarilyHidden = true
+                hidePanel()
+            } else {
+                cardTemporarilyHidden = false
+                if displayableInfo() != nil { showPanel(userInitiated: true) }
+            }
+            return
+        }
         panelIsShown ? hidePanel() : showPanel()
     }
 
-    private func showPanel() {
-        guard let button = statusItem.button, let bwin = button.window else { return }
+    /// Where the card sits: below the status item, centered on the button and
+    /// clamped to the screen. `nil` while the button has no window yet.
+    private func cardOrigin(for size: NSSize) -> NSPoint? {
+        guard let button = statusItem.button, let bwin = button.window else { return nil }
+        let btn = bwin.convertToScreen(button.convert(button.bounds, to: nil))
+        var x = btn.midX - size.width / 2
+        let y = btn.minY - size.height - 15
+        if let scr = bwin.screen ?? NSScreen.main {
+            x = min(max(x, scr.frame.minX + 8), scr.frame.maxX - size.width - 8)
+        }
+        return NSPoint(x: x, y: y)
+    }
+
+    /// Always-shown modes: shows or hides the card to match whether playback
+    /// info exists (same notion as the menu bar title), unless the user hid it.
+    private func syncAutoCard() {
+        guard isAlwaysShown else { return }
+        let want = displayableInfo() != nil && !cardTemporarilyHidden
+        if want && !cardActive && !cardShowPending {
+            showPanel(userInitiated: false)
+        } else if !want && cardActive {
+            hidePanel()
+        }
+    }
+
+    /// The status bar lays the item out asynchronously, so the lyrics also need a signal once the
+    /// button window has really moved. Several notifications in one runloop pass count once.
+    private func observeStatusItemWindow() {
+        guard let window = statusItem.button?.window, window !== observedStatusWindow else { return }
+        statusWindowObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        observedStatusWindow = window
+        statusWindowObservers = [NSWindow.didMoveNotification, NSWindow.didResizeNotification].map {
+            NotificationCenter.default.addObserver(forName: $0, object: window, queue: .main) { [weak self] _ in
+                self?.scheduleStatusItemDidMove()
+            }
+        }
+    }
+
+    private func scheduleStatusItemDidMove() {
+        guard !statusMoveScheduled else { return }
+        statusMoveScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            self?.statusMoveScheduled = false
+            self?.lyrics?.statusItemDidMove()
+        }
+    }
+
+    /// The widget's width changed: re-center the card once the changes settle
+    /// (0.25 s debounce) so it doesn't jitter while the title animates.
+    private func statusItemMoved() {
+        observeStatusItemWindow()
+        lyrics?.statusItemDidMove()
+        guard isAlwaysShown, cardActive else { return }
+        cardFollowItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.isAlwaysShown, self.cardActive, let panel = self.panel,
+                  let origin = self.cardOrigin(for: panel.frame.size),
+                  abs(origin.x - panel.frame.origin.x) > 0.5
+                    || abs(origin.y - panel.frame.origin.y) > 0.5 else { return }
+            panel.setFrameOrigin(origin)
+            self.lyrics?.statusItemDidMove()
+        }
+        cardFollowItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: item)
+    }
+
+    /// Always-shown modes: a shuffle/repeat option change alters the card size,
+    /// which needs a fresh panel (same path as a manual show).
+    private func resizeCardIfNeeded() {
+        guard isAlwaysShown, cardActive, let panel, panel.frame.size != controls.cardSize else { return }
+        showPanel(userInitiated: false)
+    }
+
+    private func showPanel(userInitiated: Bool = true) {
+        guard let button = statusItem.button, button.window != nil else { return }
+        cardShowPending = true
         monitor.fetchDetail { [weak self] detail in
-            guard let self, let detail else { return }
+            guard let self else { return }
+            self.cardShowPending = false
+            // Auto shows are re-validated: the situation may have changed
+            // while the fetch ran.
+            if !userInitiated, !self.isAlwaysShown || self.cardTemporarilyHidden
+                || self.displayableInfo() == nil { return }
+            guard let detail else {
+                if !userInitiated, self.cardAutoRetries < 3 {
+                    self.cardAutoRetries += 1
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                        self?.syncAutoCard()
+                    }
+                }
+                return
+            }
+            self.cardAutoRetries = 0
             self.controls.apply(detail)
 
             let size = self.controls.cardSize
@@ -178,22 +368,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             // Position below the status item, horizontally centered on the
             // button, clamped to the screen.
-            let btn = bwin.convertToScreen(button.convert(button.bounds, to: nil))
-            var x = btn.midX - size.width / 2
-            let y = btn.minY - size.height - 15
-            if let scr = bwin.screen ?? NSScreen.main {
-                x = min(max(x, scr.frame.minX + 8), scr.frame.maxX - size.width - 8)
-            }
-            panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height),
-                           display: true)
+            guard let origin = self.cardOrigin(for: size) else { return }
+            panel.setFrame(NSRect(origin: origin, size: size), display: true)
+            self.cardActive = true
+            self.lyrics?.cardWillShow(frame: panel.frame, cardWindow: panel)
             panel.alphaValue = 0
             panel.orderFrontRegardless()
             // Key (so glass buttons render active) without activating the app.
-            panel.makeKey()
+            // Automatic shows never take key focus from the user's app.
+            if userInitiated { panel.makeKey() }
 
             self.controls.startTicking()
-            self.content.setHighlighted(true)
-            self.installDismissMonitor()
+            if !self.isAlwaysShown {
+                self.content.setHighlighted(true)
+                self.installDismissMonitor()
+            }
 
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.207
@@ -205,6 +394,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func hidePanel() {
         guard let panel, panel.isVisible else { return }
+        cardActive = false
+        cardFollowItem?.cancel()
+        lyrics?.cardWillHide()
         controls.stopTicking()
         removeDismissMonitor()
         content.setHighlighted(false)
@@ -215,10 +407,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ctx.duration = 0.184
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
-        }, completionHandler: { [weak panel] in
+        }, completionHandler: { [weak self, weak panel] in
             // Don't hide if a new show re-raised the panel during the fade.
             guard let panel, panel.alphaValue < 0.05 else { return }
             panel.orderOut(nil)
+            self?.lyrics?.cardDidHide()
         })
     }
 
@@ -243,6 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
+        panel.appearance = NSAppearance(named: .darkAqua)   // window-level dark, always (FIX_GUIDE F16)
         panel.level = .statusBar
         panel.isFloatingPanel = true
         // NOT hidesOnDeactivate: this is an accessory (LSUIElement) app that is
@@ -263,12 +457,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         blur.material = .menu
         blur.blendingMode = .behindWindow
         blur.state = .active
-        blur.autoresizingMask = [.width, .height]
         blur.wantsLayer = true
         blur.layer?.cornerRadius = 22
         blur.layer?.cornerCurve = .continuous
         blur.layer?.masksToBounds = true
         blurView = blur
+
+        let dim = NSView(frame: bounds)
+        dim.wantsLayer = true
+        dim.layer?.backgroundColor = NSColor.black.cgColor
+        dim.layer?.cornerRadius = 22
+        dim.layer?.cornerCurve = .continuous
+        dim.layer?.masksToBounds = true
+        dim.isHidden = true
+        dimView = dim
         applyGlassPrefs()
 
         let card = controls.view
@@ -277,37 +479,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         glass.contentView = card
 
         let root = NSView(frame: bounds)
+        root.wantsLayer = true
+        root.layer?.cornerRadius = 22
+        root.layer?.cornerCurve = .continuous
+        root.layer?.masksToBounds = true     // clip glass shadow outside the rounded shape (F16 3a)
         root.addSubview(blur)
+        root.addSubview(dim)
         root.addSubview(glass)
         panel.contentView = root
         return panel
     }
 
     /// Clear glass look: menu-material blur, slightly see-through cover.
-    private static let clearBlurOpacity: CGFloat = 0.58
     private static let clearCoverOpacity: CGFloat = 0.85
 
     /// Apply the glass option to the live panel.
-    /// Current system Light / Dark setting. The global preference updates before
-    /// `NSApp.effectiveAppearance` does, so it is the reliable source right after a switch.
-    private static func systemIsDark() -> Bool {
-        UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
-    }
-
     private func applyGlassPrefs() {
         let clear = prefs.glassClear
+        let look = GlassAppearance.resolved(isClear: clear, noBlur: prefs.clearNoBlur)
         glassView?.style = clear ? .clear : .regular
-        // Clear glass forces a dark look on its content; follow the system
-        // Light / Dark setting instead so text stays readable in Light mode.
-        let systemDark = Self.systemIsDark()
-        let pinned = clear ? NSAppearance(named: systemDark ? .darkAqua : .aqua) : nil
+        // All glass is always dark, regardless of the system Light / Dark (PLAN 12.25).
+        let pinned = NSAppearance(named: .darkAqua)
         glassView?.appearance = pinned
         blurView?.appearance = pinned
-        blurView?.material = .menu
-        blurView?.alphaValue = Self.clearBlurOpacity
-        blurView?.isHidden = !clear || prefs.clearNoBlur
+        let frostOn = clear && !look.blurHidden
+        blurView?.material = look.blurMaterial
+        blurView?.alphaValue = look.blurOpacity
+        blurView?.isHidden = look.blurHidden
+        dimView?.alphaValue = look.dimAlpha
+        dimView?.isHidden = !(frostOn && look.dimAlpha > 0)
+        glassView?.tintColor = frostOn && look.glassTintAlpha > 0 ? NSColor(white: 0, alpha: look.glassTintAlpha) : nil
         controls.solidElements = clear
         controls.artworkAlpha = clear && prefs.clearCoverFade ? Self.clearCoverOpacity : 1
+        lyrics?.apply(glass: look)
     }
 
     // Dismiss the panel when focus leaves it:
@@ -364,6 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             hideTitle()
         }
+        syncAutoCard()
     }
 
     // MARK: - Transitions
@@ -386,6 +591,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         displayedTitle = text
         content.setTitle(text)
         statusItem.length = content.fittingWidth()
+        statusItemMoved()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = fadeDuration
             ctx.timingFunction = smoothCurve
@@ -450,6 +656,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         content.setTitle(text)
         statusItem.length = content.fittingWidth()
+        statusItemMoved()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = transitionLeg
             ctx.timingFunction = smoothCurve
@@ -489,6 +696,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             self.statusItem.length = 0
             self.content.clearTitle()
+            self.statusItemMoved()
         })
     }
 
@@ -517,6 +725,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let displayItem = NSMenuItem(title: "Display", action: nil, keyEquivalent: "")
         displayItem.submenu = buildDisplayMenu()
         menu.addItem(displayItem)
+
+        let cardItem = NSMenuItem(title: "Music Card", action: nil, keyEquivalent: "")
+        cardItem.submenu = buildCardMenu()
+        menu.addItem(cardItem)
+
+        let lyricsItem = NSMenuItem(title: "Lyrics Card", action: nil, keyEquivalent: "")
+        lyricsItem.submenu = buildLyricsMenu()
+        menu.addItem(lyricsItem)
 
         menu.addItem(.separator())
         addItem(to: menu, title: "Quit Now Playing Bar", action: #selector(quit), keyEquivalent: "q")
@@ -625,6 +841,142 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return sub
     }
 
+    // MARK: - Card menu
+
+    private func buildCardMenu() -> NSMenu {
+        NSMenu.keepOpenChoices(
+            [("On click", 0), ("Always shown", 1), ("Always shown with Lyrics Card", 2)],
+            current: prefs.cardMode
+        ) { [weak self] v in self?.applyCardMode(v) }
+    }
+
+    /// Applies a mode change immediately: card shown/hidden, dismiss monitor
+    /// installed/removed, lyrics forced onto the card or released.
+    private func applyCardMode(_ mode: Int) {
+        let old = prefs.cardMode
+        guard mode != old else { return }
+        prefs.cardMode = mode
+        cardTemporarilyHidden = false
+
+        lyrics?.setForcedCardAttachment(mode == 2)
+        monitor.wantsTimeline = lyricsActive
+        if mode == 2 {
+            syncLyricsTrack(force: true)
+            primeLyricsTimeline()
+        } else if old == 2, !lyricPrefs.enabled {
+            lastSampleKey = nil
+            lastSampleDuration = 0
+        }
+
+        if mode == 0 {
+            // Back to click-to-open: a card that is still up behaves like a
+            // manually opened one (dismissed by outside clicks).
+            if cardActive { installDismissMonitor() }
+        } else {
+            removeDismissMonitor()
+            content.setHighlighted(false)
+            syncAutoCard()
+        }
+    }
+
+    // MARK: - Lyrics menu (rows keep the menu open, like Liquid Glass)
+
+    private func lyricsChanged() { lyrics?.preferencesDidChange() }
+
+    /// Check-mark row that flips a bool without closing the menu.
+    private func lyricToggleItem(_ title: String, get: @escaping () -> Bool,
+                                 set: @escaping (Bool) -> Void) -> NSMenuItem {
+        let v = MenuChoiceView(title: title)
+        v.checked = get()
+        v.onSelect = { [weak self, unowned v] in
+            set(!get())
+            v.checked = get()
+            self?.lyricsChanged()
+        }
+        let item = NSMenuItem()
+        item.view = v
+        return item
+    }
+
+    private func lyricChoiceItem(_ title: String, choices: [(String, Int)], current: Int,
+                                 set: @escaping (Int) -> Void) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = NSMenu.keepOpenChoices(choices, current: current) { [weak self] v in
+            set(v)
+            self?.lyricsChanged()
+        }
+        return item
+    }
+
+    private func buildLyricsMenu() -> NSMenu {
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        let lp = lyricPrefs
+
+        let forced = prefs.cardMode == 2
+        let forcedNote = " (Music Card ▸ Always shown with Lyrics Card)"
+        if forced {
+            let item = NSMenuItem(title: "Show lyrics" + forcedNote, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            item.state = .on
+            sub.addItem(item)
+        } else {
+            sub.addItem(lyricToggleItem("Show lyrics", get: { lp.enabled }, set: { [weak self] on in
+                guard let self else { return }
+                lp.enabled = on
+                self.monitor.wantsTimeline = self.lyricsActive
+                self.lyrics?.preferencesDidChange()
+                if on {
+                    self.syncLyricsTrack(force: true)
+                    self.primeLyricsTimeline()
+                } else {
+                    self.lastSampleKey = nil
+                    self.lastSampleDuration = 0
+                }
+            }))
+        }
+        sub.addItem(lyricChoiceItem("Hide when paused",
+            choices: LyricPreferences.pausedHideDelayChoices.map { ($0 >= 60 ? "\(Int($0) / 60)m" : "\(Int($0))s", Int($0)) },
+            current: Int(lp.pausedHideDelay)) { lp.pausedHideDelay = TimeInterval($0) })
+        sub.addItem(.separator())
+
+        if forced {
+            let item = NSMenuItem(title: "Placement" + forcedNote, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            sub.addItem(item)
+        } else {
+            sub.addItem(lyricChoiceItem("Placement",
+                choices: [("Floating", 0), ("Below card", 1), ("Below menu bar", 2)],
+                current: lp.placement.rawValue) { lp.placement = .init(rawValue: $0) ?? .belowCard })
+        }
+        sub.addItem(lyricChoiceItem("Context",
+            choices: [("Around current line", 0), ("Upcoming only", 1)],
+            current: lp.context.rawValue) { lp.context = .init(rawValue: $0) ?? .around })
+
+        let lineChoices = LyricPreferences.lineChoices.map { (String($0), $0) }
+        sub.addItem(lyricChoiceItem("Lines", choices: lineChoices, current: lp.lines) { lp.lines = $0 })
+
+        sub.addItem(lyricChoiceItem("Text size",
+            choices: [("S", 0), ("M", 1), ("L", 2)],
+            current: lp.textSize.rawValue) { lp.textSize = .init(rawValue: $0) ?? .medium })
+        sub.addItem(lyricChoiceItem("Floating width (floating only)",
+            choices: LyricPreferences.floatingWidthChoices.map { (String(Int($0)), Int($0)) },
+            current: Int(lp.floatingWidth)) { lp.floatingWidth = CGFloat($0) })
+
+        sub.addItem(.separator())
+        sub.addItem(lyricToggleItem("Lock position (floating only)",
+            get: { lp.floatingLocked }, set: { lp.floatingLocked = $0 }))
+        sub.addItem(lyricToggleItem("Click-through",
+            get: { lp.clickThrough }, set: { lp.clickThrough = $0 }))
+        sub.addItem(lyricToggleItem("Blur other lines",
+            get: { lp.blurInactive }, set: { lp.blurInactive = $0 }))
+        sub.addItem(lyricToggleItem("Click line to seek",
+            get: { lp.clickToSeek }, set: { lp.clickToSeek = $0 }))
+        sub.addItem(lyricToggleItem("Show translation",
+            get: { lp.showTranslation }, set: { lp.showTranslation = $0 }))
+        return sub
+    }
+
     private func buildWidthMenu() -> NSMenu {
         let sub = NSMenu()
         sub.autoenablesItems = false
@@ -674,10 +1026,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Actions
 
-    @objc private func toggleShowAllSources() { prefs.filterEnabled.toggle(); updateDisplay() }
+    @objc private func toggleShowAllSources() { prefs.filterEnabled.toggle(); updateDisplay(); syncLyricsTrack() }
     @objc private func toggleSource(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
-        prefs.toggleSource(id); updateDisplay()
+        prefs.toggleSource(id); updateDisplay(); syncLyricsTrack()
     }
     @objc private func toggleShowArtist()    { prefs.showArtist.toggle();    updateDisplay() }
     @objc private func toggleShowAlbum()     { prefs.showAlbum.toggle();     updateDisplay() }
@@ -685,6 +1037,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleShowShuffleRepeat() {
         prefs.showShuffleRepeat.toggle()
         controls.showsShuffleRepeat = prefs.showShuffleRepeat
+        resizeCardIfNeeded()
     }
 
     @objc private func setWidth(_ sender: NSMenuItem) {
@@ -698,6 +1051,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         prefs.maxWidth = value
         content.marqueeMaxWidth = prefs.maxWidth
         if isShowing { statusItem.length = content.fittingWidth() }
+        statusItemMoved()
     }
 
     @objc private func customWidth() {
@@ -735,3 +1089,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func quit() { NSApp.terminate(nil) }
 }
+
