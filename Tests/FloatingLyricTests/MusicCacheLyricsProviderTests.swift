@@ -246,14 +246,20 @@ struct MusicCacheLyricsProviderTests {
         #expect(calls.value >= 3)
     }
 
-    @Test func durationOnlyMatchesSingleCandidate() async throws {
+    @Test func durationOnlyDoesNotMatchStaleSingleCandidate() async throws {
         let cache = try FakeCache()
-        try cache.add(json: FakeCache.json(name: "Localized", artist: "A", duration: 200_060, ttml: Fixture.wordTTML), onFS: true)
-        try cache.add(json: FakeCache.json(name: "Far", artist: "A", duration: 230_000, ttml: Fixture.lineTTML), onFS: true)
-        let provider = MusicCacheLyricsProvider(cacheDirectory: cache.dir, pollInterval: 0.05,
-                                                giveUpAfter: 1, launchDate: { Date(timeIntervalSince1970: 0) },
-                                                completionQueue: queue)
-        #expect(await fetch(provider, track("Titel"))?.timing == .word)
+        try cache.add(json: FakeCache.json(name: "Localized", artist: "A", duration: 200_100, ttml: Fixture.wordTTML),
+                      onFS: true, stamp: "2026-10-23 12:00:00")
+        let start = ISO8601DateFormatter().date(from: "2026-10-23T12:40:00Z")!
+        for known in [false, true] {
+            let provider = MusicCacheLyricsProvider(cacheDirectory: cache.dir, pollInterval: 0.05,
+                                                    giveUpAfter: 0.3, launchDate: { Date(timeIntervalSince1970: 0) },
+                                                    completionQueue: queue)
+            let r = Results()
+            provider.lyrics(for: track("Titel"), trackStart: { known ? start : nil }) { r.add($0) }
+            #expect(await r.wait(count: 1))
+            #expect(r.all.first?.document == nil)
+        }
     }
 
     @Test func durationOnlyRejectsTwoCandidates() async throws {

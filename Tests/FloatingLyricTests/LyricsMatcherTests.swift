@@ -110,17 +110,11 @@ struct LyricsMatcherTests {
         #expect(r == nil)
     }
 
-    @Test func durationOnlyLastResort() {
-        let launch = Self.t0.addingTimeInterval(-100)
-        let one = cand("Localized", duration: 200.06)
-        #expect(LyricsMatcher.pick(from: [one], for: track("Other"), trackStart: nil, launch: launch) != nil)
-        // Too far, older than launch, or no launch known: no match.
-        #expect(LyricsMatcher.pick(from: [cand("L", duration: 200.2)], for: track("Other"), trackStart: nil, launch: launch) == nil)
-        #expect(LyricsMatcher.pick(from: [one], for: track("Other"), trackStart: nil, launch: Self.t0.addingTimeInterval(100)) == nil)
-        #expect(LyricsMatcher.pick(from: [one], for: track("Other"), trackStart: nil) == nil)
-        // Ambiguous.
-        #expect(LyricsMatcher.pick(from: [one, cand("L2", duration: 199.9)], for: track("Other"),
-                                   trackStart: nil, launch: launch) == nil)
+    @Test func staleSingleCandidateWithCloseDurationDoesNotMatch() {
+        // F23: only the duration is close (0.1 s), cached 40 minutes before the start.
+        let stale = cand("Old", duration: 200.1, at: Self.t0.addingTimeInterval(-2400))
+        #expect(LyricsMatcher.pick(from: [stale], for: track("Other"), trackStart: nil) == nil)
+        #expect(LyricsMatcher.pick(from: [stale], for: track("Other"), trackStart: Self.t0) == nil)
     }
 
     @Test func diagnosticsReportTrackStartKnown() {

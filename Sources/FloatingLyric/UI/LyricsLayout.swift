@@ -11,7 +11,7 @@ enum LyricsLayout {
         static let maxBlurDistance = 4
         static let blurPerStep: CGFloat = 1.0
         /// Gaps at least this long get a "..." row (PLAN 4.1).
-        static let interludeMinGap: TimeInterval = 4
+        static let interludeMinGap: TimeInterval = 6
     }
 
     /// One list row: a lyric line or the interlude dots shown before `lines[beforeLine]`.

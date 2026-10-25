@@ -26,12 +26,10 @@ enum LyricsMatcher {
         /// song's response up to ~10 s before it starts, so the window leans early (FIX_GUIDE F1).
         static let timeWindow: ClosedRange<TimeInterval> = -30...10
         static let timeDurationTolerance: TimeInterval = 0.5
-        /// Last resort: a single entry this close in duration (FIX_GUIDE F19).
-        static let durationOnlyTolerance: TimeInterval = 0.15
     }
 
     static func pick(from candidates: [CacheCandidate], for track: TrackRef,
-                     trackStart: Date?, launch: Date? = nil) -> CacheCandidate? {
+                     trackStart: Date?) -> CacheCandidate? {
         let title = normalize(track.title)
         guard !title.isEmpty else { return nil }
         // MediaRemote can report duration 0 right after a track starts: then
@@ -49,13 +47,6 @@ enum LyricsMatcher {
                 Metrics.timeWindow.contains($0.cachedAt.timeIntervalSince(start))
                     && delta($0) <= Metrics.timeDurationTolerance
             }
-        }
-        if pool.isEmpty, durationKnown, let launch {
-            // Title is localized and the start time is unknown: accept only an unambiguous entry.
-            let close = candidates.filter {
-                $0.cachedAt >= launch && delta($0) <= Metrics.durationOnlyTolerance
-            }
-            if close.count == 1 { return close[0] }
         }
         guard !pool.isEmpty else { return nil }
 
@@ -394,8 +385,7 @@ final class MusicCacheLyricsProvider {
             lastQuery = Date()
             let candidates = loadCandidates()
             let start = trackStart()
-            if let hit = LyricsMatcher.pick(from: candidates, for: track, trackStart: start,
-                                            launch: provider.launchDate()) {
+            if let hit = LyricsMatcher.pick(from: candidates, for: track, trackStart: start) {
                 if gaveUp {
                     let n = Int(Date().timeIntervalSince(startedAt).rounded())
                     provider.logOnce("late", track: track, "late match after \(n) s")
