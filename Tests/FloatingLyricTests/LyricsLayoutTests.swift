@@ -18,6 +18,15 @@ import Testing
                            visibilityMargin: 30)
     }
 
+    @Test func lineMoveIsFastWhenLinesFollowRightAway() {
+        let lines = [line(0, 2), line(2.2, 4), line(5.5, 7), line(1.5, 3)]
+        #expect(LyricsLayout.lineTransitionDuration(fromLine: 0, toLine: 1, lines: lines) == 0.4)    // gap 0.2
+        #expect(LyricsLayout.lineTransitionDuration(fromLine: 1, toLine: 2, lines: lines) == 0.65)    // gap 1.5
+        #expect(LyricsLayout.lineTransitionDuration(fromLine: 3, toLine: 2, lines: lines) == 0.65)    // backwards
+        #expect(LyricsLayout.lineTransitionDuration(fromLine: nil, toLine: 0, lines: lines) == 0.65)  // first line
+        #expect(LyricsLayout.lineTransitionDuration(fromLine: 0, toLine: nil, lines: lines) == 0.65)  // interlude
+    }
+
     @Test func anchorSlots() {
         let expected: [(Int, Int)] = [(1, 0), (2, 0), (3, 1), (5, 2), (9, 4)]
         for (n, slot) in expected {

@@ -46,7 +46,6 @@ final class LyricsView: NSView {
         static let springDamping: CGFloat = 1.0
         static let transition: CFTimeInterval = 0.25
         /// Line-to-line move (scroll, opacity, blur, scale share it).
-        static let lineTransition: CFTimeInterval = 0.5
         /// The centered line / interlude switch this much before the real begin.
         static let lineLead: TimeInterval = 0.3
         static let reducedFade: CFTimeInterval = 0.2
@@ -444,6 +443,7 @@ final class LyricsView: NSView {
                     rows[lineRow[i]].line?.setPosition(LyricsLayout.sungEnd(of: doc.lines[i]), animated: false)
                 }
             }
+            lineMoveDuration = LyricsLayout.lineTransitionDuration(fromLine: focus?.activeLine, toLine: newFocus.activeLine, lines: doc.lines)
             focus = newFocus
             applyStates(newFocus, animated: !jump)
             applyLayout(animated: !jump && !isUserScrolling, lineTransition: true)
@@ -456,6 +456,9 @@ final class LyricsView: NSView {
             row.interlude?.setProgress(CGFloat(progress))
         }
     }
+
+    /// Time of the current line-to-line move (set per focus change).
+    private var lineMoveDuration: CFTimeInterval = LyricsLayout.Metrics.slowLineTransition
 
     private func fadeRows(duration: CFTimeInterval) {
         let a = CABasicAnimation(keyPath: "opacity")
@@ -587,8 +590,8 @@ final class LyricsView: NSView {
         let a = CABasicAnimation(keyPath: key)
         a.fromValue = from
         a.toValue = to
-        a.duration = line ? Metrics.lineTransition : Metrics.transition
-        a.timingFunction = line ? CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+        a.duration = line ? lineMoveDuration : Metrics.transition
+        a.timingFunction = line ? CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)   // soft start, long settle
                                 : CAMediaTimingFunction(name: .easeInEaseOut)
         a.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) + delay
         a.fillMode = .backwards

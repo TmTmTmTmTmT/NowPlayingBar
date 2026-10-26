@@ -6,6 +6,10 @@ import CoreGraphics
 enum LyricsLayout {
     enum Metrics {
         static let inactiveOpacity: CGFloat = 0.32
+        /// Gap below which two lines count as connected.
+        static let connectedGap: TimeInterval = 1.0
+        static let fastLineTransition: CFTimeInterval = 0.4
+        static let slowLineTransition: CFTimeInterval = 0.65
         static let pastOpacity: CGFloat = 0.22
         static let inactiveScale: CGFloat = 0.97
         static let maxBlurDistance = 4
@@ -106,6 +110,20 @@ enum LyricsLayout {
     /// When the line's last body word ends (background vocals excluded); `line.end` without words.
     static func sungEnd(of line: LyricLine) -> TimeInterval {
         line.words.map(\.end).max() ?? line.end
+    }
+
+    /// Line-to-line move time: lines that follow each other right away move quickly, lines after a
+    /// pause move slowly. `gap` = next line's begin minus the previous line's sung end.
+    static func lineTransitionDuration(gap: TimeInterval?) -> CFTimeInterval {
+        guard let gap, gap < Metrics.connectedGap else { return Metrics.slowLineTransition }
+        return Metrics.fastLineTransition
+    }
+
+    /// Duration for a move from line `from` to line `to`; anything else (interlude, first line, jump
+    /// backwards) is the slow move.
+    static func lineTransitionDuration(fromLine from: Int?, toLine to: Int?, lines: [LyricLine]) -> CFTimeInterval {
+        guard let from, let to, to > from, from >= 0, to < lines.count else { return lineTransitionDuration(gap: nil) }
+        return lineTransitionDuration(gap: lines[to].begin - sungEnd(of: lines[from]))
     }
 
     /// Earlier lines (index < active) still being sung at `position`, ascending.
