@@ -251,6 +251,7 @@ public final class FloatingLyricController {
         lookupIdentity = identity(of: track)
         lyricsRequest += 1
         let request = lyricsRequest
+        if !relookup { lyricsMissing = false }
         guard LyricTrackState.supportsLyrics(sourceBundleID: track.sourceBundleID) else {
             lyricsProvider.cancel()
             document = nil
@@ -273,7 +274,10 @@ public final class FloatingLyricController {
             guard LyricTrackState.shouldReplace(current: self.document, with: doc, isRelookup: relookup) else { return }
             self.document = doc
             log.debug("lyrics result id=\(doc?.songID ?? "none", privacy: .public) lines=\(doc?.lines.count ?? 0, privacy: .public) noSession=\(result.noSessionEntries, privacy: .public)")
-            self.stage?.lyrics.show(document: doc, emptyState: LyricTrackState.emptyState(for: result))
+            let empty = LyricTrackState.emptyState(for: result)
+            self.stage?.lyrics.show(document: doc, emptyState: empty)
+            self.lyricsMissing = LyricTrackState.hidesPanel(document: doc, emptyState: empty)
+            self.syncVisibility()
         }
     }
 
@@ -284,6 +288,7 @@ public final class FloatingLyricController {
         playlistRequest += 1
         lookupIdentity = nil
         document = nil
+        lyricsMissing = false
         playlistLoaded = false
         playlistCurrentIndex = nil
         stage?.lyrics.show(document: nil, emptyState: .none)
@@ -296,6 +301,7 @@ public final class FloatingLyricController {
         playlistRequest += 1
         lookupIdentity = nil
         document = nil
+        lyricsMissing = false
         stage?.lyrics.show(document: nil, emptyState: .none)
     }
 
@@ -404,6 +410,8 @@ public final class FloatingLyricController {
 
     /// The user is scrolling the lyrics: the paused auto-hide waits.
     private var userScrolling = false
+    /// The lookup finished without lyrics: the lyrics tab has nothing to show, so the panel hides.
+    private var lyricsMissing = false
 
     private var pausedFor: TimeInterval {
         if pauseExpired { return preferences.pausedHideDelay }
@@ -441,6 +449,7 @@ public final class FloatingLyricController {
                                                                                   scrolling: userScrolling),
                                         hideDelay: preferences.pausedHideDelay)
         else { return false }
+        if lyricsMissing && effectiveTab == .lyrics { return false }
         switch placement {
         case .floating:
             return true

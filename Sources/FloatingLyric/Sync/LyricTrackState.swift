@@ -64,6 +64,11 @@ enum LyricTrackState {
         return result.noSessionEntries ? .openLyricsInMusicOnce : .noLyrics
     }
 
+    /// A finished lookup with nothing found hides the panel (the Music-hint state stays visible).
+    static func hidesPanel(document: LyricsDocument?, emptyState: LyricsEmptyState) -> Bool {
+        document == nil && emptyState == .noLyrics
+    }
+
     // MARK: Forced card attachment (PLAN 12.3)
 
     /// "Always shown with Lyrics Card" counts lyrics as on regardless of the saved switch.
