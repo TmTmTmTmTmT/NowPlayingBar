@@ -142,6 +142,7 @@ public final class FloatingLyricController {
         timelineLock.lock(); timelineSnapshot = new; timelineLock.unlock()
         let wasPlaying = isPlaying
         isPlaying = new.isPlaying
+        publishAtmos()
         if new.isPlaying {
             pausedSince = nil
             pauseExpired = false
@@ -251,7 +252,7 @@ public final class FloatingLyricController {
         lookupIdentity = identity(of: track)
         lyricsRequest += 1
         let request = lyricsRequest
-        if !relookup { lyricsMissing = false }
+        if !relookup { lyricsMissing = false; atmosTrack = false }
         guard LyricTrackState.supportsLyrics(sourceBundleID: track.sourceBundleID) else {
             lyricsProvider.cancel()
             document = nil
@@ -277,6 +278,7 @@ public final class FloatingLyricController {
             let empty = LyricTrackState.emptyState(for: result)
             self.stage?.lyrics.show(document: doc, emptyState: empty)
             self.lyricsMissing = LyricTrackState.hidesPanel(document: doc, emptyState: empty)
+            self.atmosTrack = doc?.isAtmos == true && AtmosSetting.isEnabled(rawValue: AtmosSetting.rawValue())
             self.syncVisibility()
         }
     }
@@ -289,6 +291,7 @@ public final class FloatingLyricController {
         lookupIdentity = nil
         document = nil
         lyricsMissing = false
+        atmosTrack = false
         playlistLoaded = false
         playlistCurrentIndex = nil
         stage?.lyrics.show(document: nil, emptyState: .none)
@@ -302,6 +305,7 @@ public final class FloatingLyricController {
         lookupIdentity = nil
         document = nil
         lyricsMissing = false
+        atmosTrack = false
         stage?.lyrics.show(document: nil, emptyState: .none)
     }
 
@@ -412,6 +416,19 @@ public final class FloatingLyricController {
     private var userScrolling = false
     /// The lookup finished without lyrics: the lyrics tab has nothing to show, so the panel hides.
     private var lyricsMissing = false
+
+    /// The current song has an Atmos version and Music's Atmos setting is on (known from the lyrics lookup).
+    private var atmosTrack = false { didSet { publishAtmos() } }
+    private var lastAtmosPublished = false
+    /// true while an Atmos song is playing; called on the main thread when it changes.
+    public var onAtmosChange: ((Bool) -> Void)?
+
+    private func publishAtmos() {
+        let now = isEnabled && atmosTrack && isPlaying
+        guard now != lastAtmosPublished else { return }
+        lastAtmosPublished = now
+        onAtmosChange?(now)
+    }
 
     private var pausedFor: TimeInterval {
         if pauseExpired { return preferences.pausedHideDelay }

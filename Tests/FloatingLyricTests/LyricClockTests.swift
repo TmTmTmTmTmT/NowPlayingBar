@@ -20,6 +20,23 @@ import Testing
         #expect(c.update(timeline: tl(10, at: t0), now: t0))
     }
 
+    @Test func negativeOffsetHoldsLyricsBack() {
+        let c = LyricClock()
+        c.timingOffset = -1
+        c.update(timeline: tl(10, at: t0), now: t0)
+        #expect(abs(c.position(at: t0.addingTimeInterval(1.5)) - 10.5) < 1e-9)
+        c.timingOffset = -AtmosSetting.delay
+        c.update(timeline: tl(0.5, at: t0), now: t0)
+        #expect(c.position(at: t0) == 0)                       // never negative
+    }
+
+    @Test func atmosSettingOnlyOffAtThirty() {
+        #expect(!AtmosSetting.isEnabled(rawValue: 30))
+        #expect(AtmosSetting.isEnabled(rawValue: nil))
+        #expect(AtmosSetting.isEnabled(rawValue: 10))
+        #expect(AtmosSetting.isEnabled(rawValue: 20))
+    }
+
     @Test func interpolatesBetweenSamples() {
         let c = LyricClock()
         c.update(timeline: tl(10, at: t0), now: t0)

@@ -27,10 +27,12 @@ private final class FakeCache {
 
     private func exec(_ sql: String) { sqlite3_exec(db, sql, nil, nil, nil) }
 
-    static func json(name: String, artist: String, duration: Int, ttml: String) -> String {
+    static func json(name: String, artist: String, duration: Int, ttml: String, traits: [String]? = nil) -> String {
+        var attrs: [String: Any] = ["name": name, "artistName": artist, "albumName": "Album", "durationInMillis": duration]
+        if let traits { attrs["audioTraits"] = traits }
         let obj: [String: Any] = ["data": [[
             "id": "1234567",
-            "attributes": ["name": name, "artistName": artist, "albumName": "Album", "durationInMillis": duration],
+            "attributes": attrs,
             "relationships": ["syllable-lyrics": ["data": [["attributes": ["ttmlLocalizations": ttml]]]]],
         ]]]
         let data = try! JSONSerialization.data(withJSONObject: obj)
@@ -100,6 +102,16 @@ private let launchAfter = ISO8601DateFormatter().date(from: "2026-10-24T00:00:00
 
 
 struct MusicCacheLyricsProviderTests {
+    @Test(arguments: [(["atmos", "lossless"], true), (["lossless"], false), (nil, false)] as [([String]?, Bool)])
+    func atmosTraitSetsIsAtmos(traits: [String]?, expected: Bool) async throws {
+        let cache = try FakeCache()
+        try cache.add(json: FakeCache.json(name: "Song", artist: "A", duration: 200_000, ttml: Fixture.wordTTML, traits: traits), onFS: false)
+        let provider = MusicCacheLyricsProvider(cacheDirectory: cache.dir, pollInterval: 0.05,
+                                                giveUpAfter: 1, completionQueue: queue)
+        let doc = await fetch(provider, track("Song"))
+        #expect(doc?.isAtmos == expected)
+    }
+
     @Test(arguments: [true, false])
     func findsLyricsInFileOrBlob(onFS: Bool) async throws {
         let cache = try FakeCache()

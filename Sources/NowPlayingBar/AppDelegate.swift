@@ -138,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let b = self?.statusItem.button, let w = b.window else { return nil }
                 return w.convertToScreen(b.convert(b.bounds, to: nil))
             }))
+        lyrics?.onAtmosChange = { [weak self] on in self?.controls.showsAtmos = on }
         lyrics?.setForcedCardAttachment(prefs.cardMode == 2)
         observeStatusItemWindow()
         applyGlassPrefs()

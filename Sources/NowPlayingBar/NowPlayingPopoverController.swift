@@ -103,6 +103,7 @@ final class NowPlayingPopoverController: NSViewController {
         [prevButton, playButton, nextButton].forEach { $0.contentTintColor = primaryColor }
         titleMarquee.baseColor = primaryColor
         artistMarquee.baseColor = secondaryColor
+        atmosBadge.color = secondaryColor
         [elapsedLabel, remainingLabel].forEach { $0.textColor = Self.solidColor(alpha: 0.8) }  // same in Regular and Clear
         updateModeButtons()
     }
@@ -113,6 +114,15 @@ final class NowPlayingPopoverController: NSViewController {
     }
     private let titleMarquee  = MarqueeView(frame: .zero)
     private let artistMarquee = MarqueeView(frame: .zero)
+    private let atmosBadge = AtmosBadgeView()
+    /// An Atmos song is playing: the badge sits at the right end of the title row.
+    var showsAtmos = false {
+        didSet {
+            guard showsAtmos != oldValue else { return }
+            atmosBadge.isHidden = !showsAtmos
+            if isViewLoaded { relayout() }
+        }
+    }
     private let prevButton  = HighlightButton()
     private let playButton  = HighlightButton()
     private let nextButton  = HighlightButton()
@@ -197,7 +207,8 @@ final class NowPlayingPopoverController: NSViewController {
         [prevButton, playButton, nextButton, shuffleButton, repeatButton]
             .forEach(buttonRow.addSubview)
 
-        [artworkGlass, titleMarquee, artistMarquee, buttonRow, scrubBar, elapsedLabel,
+        atmosBadge.isHidden = !showsAtmos
+        [artworkGlass, titleMarquee, artistMarquee, atmosBadge, buttonRow, scrubBar, elapsedLabel,
          remainingLabel].forEach(container.addSubview)
 
         view = container
@@ -242,7 +253,11 @@ final class NowPlayingPopoverController: NSViewController {
         let rw = w - rx - pad
 
         let titleH: CGFloat = 20
-        titleMarquee.frame  = NSRect(x: rx, y: h - pad - titleH, width: rw, height: titleH)
+        let badgeW = showsAtmos ? AtmosBadgeView.size.width + 8 : 0
+        titleMarquee.frame  = NSRect(x: rx, y: h - pad - titleH, width: rw - badgeW, height: titleH)
+        atmosBadge.frame = NSRect(x: rx + rw - AtmosBadgeView.size.width,
+                                  y: h - pad - titleH + (titleH - AtmosBadgeView.size.height) / 2,
+                                  width: AtmosBadgeView.size.width, height: AtmosBadgeView.size.height)
         artistMarquee.frame = NSRect(x: rx, y: h - pad - titleH - 2 - 16, width: rw, height: 16)
 
         // Time labels at the bottom, scrubber just above them.

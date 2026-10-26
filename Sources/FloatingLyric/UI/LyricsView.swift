@@ -201,6 +201,12 @@ final class LyricsView: NSView {
         let usable = document.flatMap { $0.lines.isEmpty ? nil : $0 }
         self.document = usable
         clock.resetDisplayedPosition()      // new track or document: start from its real position
+        let setting = AtmosSetting.rawValue()
+        clock.timingOffset = (AtmosSetting.autoCompensate && usable?.isAtmos == true
+                              && AtmosSetting.isEnabled(rawValue: setting)) ? -AtmosSetting.delay : 0
+        if usable?.isAtmos == true {
+            log.notice("atmos=true setting=\(setting.map(String.init) ?? "none", privacy: .public) offset=\(self.clock.timingOffset, privacy: .public)")
+        }
         self.emptyState = usable == nil ? (emptyState == .none && document != nil ? .noLyrics : emptyState) : .none
         endUserScroll()
         if let usable {
@@ -713,7 +719,7 @@ final class LyricsView: NSView {
         pressStart = nil; pressEvent = nil
         guard !Self.isDrag(from: start, to: event.locationInWindow), let doc = document,
               let i = lineIndex(atWindowPoint: start) else { return }
-        onSeek?(doc.lines[i].begin)
+        onSeek?(doc.lines[i].begin - clock.timingOffset)   // lyric time -> playback position
     }
 
     /// The visible line under a window-coordinate point, if any.

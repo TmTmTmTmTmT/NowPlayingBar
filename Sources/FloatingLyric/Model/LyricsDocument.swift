@@ -34,4 +34,6 @@ struct LyricsDocument: Equatable {
     var lines: [LyricLine]
     /// Catalog id of the song the lyrics belong to; the only id that is logged.
     var songID: String? = nil
+    /// The song has a Dolby Atmos version (catalog `audioTraits`): its playback lags the reported position.
+    var isAtmos: Bool = false
 }

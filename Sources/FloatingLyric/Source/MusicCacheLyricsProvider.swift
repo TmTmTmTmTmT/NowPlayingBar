@@ -14,6 +14,7 @@ struct CacheCandidate {
     var cachedAt: Date
     var ttml: String
     var songID: String? = nil
+    var isAtmos: Bool = false
 }
 
 /// Picks the cache entry that belongs to the playing track (PLAN §3.3 v2).
@@ -418,6 +419,7 @@ final class MusicCacheLyricsProvider {
             teardown()
             var doc = TTMLParser.parse(hit.ttml)
             doc?.songID = hit.songID
+            doc?.isAtmos = hit.isAtmos
             if let doc {
                 provider.remember(doc, for: track)
                 provider.logOnce("ok", track: track,
@@ -517,7 +519,8 @@ final class MusicCacheLyricsProvider {
                                   artistName: attrs["artistName"] as? String ?? "",
                                   albumName: attrs["albumName"] as? String ?? "",
                                   duration: millis / 1000, cachedAt: cachedAt, ttml: ttml,
-                                  songID: Self.stringID(song["id"]))
+                                  songID: Self.stringID(song["id"]),
+                                  isAtmos: (attrs["audioTraits"] as? [String])?.contains("atmos") ?? false)
         }
     }
 }
