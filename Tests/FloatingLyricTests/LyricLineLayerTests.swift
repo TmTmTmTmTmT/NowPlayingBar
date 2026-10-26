@@ -267,9 +267,9 @@ import Testing
         let glyphs = l.blocks.flatMap(\.fragments).flatMap(\.glyphs)
         func white(_ g: LyricLineLayer.Glyph) throws -> CGFloat { try #require(g.bright.backgroundColor?.components)[0] }
         l.setPosition(10.01)
-        #expect(abs(try white(glyphs[4]) - 1.35) < 1e-6)
+        #expect(abs(try white(glyphs[4]) - 1.5) < 1e-6)
         let f = try #require(l.blocks.first?.fragments.last)           // "beta": plain word, base color
-        #expect(abs(try #require(f.bright?.backgroundColor?.components)[0] - 1.35) < 1e-6)
+        #expect(abs(try #require(f.bright?.backgroundColor?.components)[0] - 1.5) < 1e-6)
         l.setPosition(16)
         #expect(abs(try white(glyphs[0]) - 2.0) < 1e-6)               // s = 1 peak of the mode
         l.setDynamicRange(headroom: 1.3, mode: .plainClear)            // potential clamp
@@ -321,7 +321,7 @@ import Testing
         let palette = LyricPalette(glass: glass)
         let light = LyricPalette.resolve(palette.unfilled, in: NSAppearance(named: .aqua)!)
         let dark = LyricPalette.resolve(palette.unfilled, in: NSAppearance(named: .darkAqua)!)
-        #expect(abs(light.alpha - 0.35) < 1e-6 && abs(dark.alpha - 0.35) < 1e-6)
+        #expect(abs(light.alpha - 0.5) < 1e-6 && abs(dark.alpha - 0.5) < 1e-6)
         #expect(try #require(light.components)[0] < 0.1)        // black on Light
         #expect(try #require(dark.components)[0] > 0.9)         // white on Dark
         // Same through the drawing-appearance path a view under a different system appearance takes.

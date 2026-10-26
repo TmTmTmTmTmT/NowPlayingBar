@@ -10,6 +10,7 @@ struct LyricPalette: Equatable {
 
     enum Metrics {
         static let unfilledAlpha: CGFloat = 0.35
+        static let clearUnfilledAlpha: CGFloat = 0.5
     }
 
     init(glass: GlassAppearance) {
@@ -20,7 +21,7 @@ struct LyricPalette: Equatable {
             active = .labelColor
             secondary = .secondaryLabelColor
         }
-        unfilled = Self.dimmed(active, alpha: Metrics.unfilledAlpha)
+        unfilled = Self.dimmed(active, alpha: glass.isClear ? Metrics.clearUnfilledAlpha : Metrics.unfilledAlpha)
     }
 
     /// `color` with its alpha replaced, but resolved only when drawn: the render-time appearance picks

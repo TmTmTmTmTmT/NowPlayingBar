@@ -47,19 +47,19 @@ import Testing
 
     @Test func modeValues() {
         #expect(LyricHDR.Mode.standard.base == 1.03 && LyricHDR.Mode.standard.peakMin == 1.15 && LyricHDR.Mode.standard.peakMax == 1.6)
-        #expect(LyricHDR.Mode.plainClear.base == 1.35 && LyricHDR.Mode.plainClear.peakMin == 1.5 && LyricHDR.Mode.plainClear.peakMax == 2.0)
-        #expect(LyricHDR.Mode.clearFrost.base == 1.10 && LyricHDR.Mode.clearFrost.peakMin == 1.25 && LyricHDR.Mode.clearFrost.peakMax == 1.7)
-        #expect(LyricHDR.level(progress: 1, strength: 1, headroom: 16, mode: .clearFrost) == 1.7)
-        #expect(LyricHDR.level(progress: 0, strength: 1, headroom: 16, mode: .clearFrost) == 1.1)
+        #expect(LyricHDR.Mode.plainClear.base == 1.5 && LyricHDR.Mode.plainClear.peakMin == 1.65 && LyricHDR.Mode.plainClear.peakMax == 2.2)
+        #expect(LyricHDR.Mode.clearFrost.base == 1.22 && LyricHDR.Mode.clearFrost.peakMin == 1.38 && LyricHDR.Mode.clearFrost.peakMax == 1.85)
+        #expect(LyricHDR.level(progress: 1, strength: 1, headroom: 16, mode: .clearFrost) == 1.85)
+        #expect(LyricHDR.level(progress: 0, strength: 1, headroom: 16, mode: .clearFrost) == 1.22)
         #expect(LyricHDR.headroom(isDark: true, potential: 1.5, target: LyricHDR.Mode.clearFrost.peakMax) == 1.5)
         let m = LyricHDR.Mode.plainClear
-        #expect(LyricHDR.baseValue(headroom: 16, mode: m) == 1.35)
-        #expect(LyricHDR.peakValue(strength: 0, headroom: 16, mode: m) == 1.5)
-        #expect(LyricHDR.peakValue(strength: 1, headroom: 16, mode: m) == 2.0)
-        #expect(abs(LyricHDR.peakValue(strength: 0.5, headroom: 16, mode: m) - 1.75) < 1e-9)
-        #expect(LyricHDR.level(progress: 0, strength: 1, headroom: 16, mode: m) == 1.35)
-        #expect(LyricHDR.level(progress: 1, strength: 1, headroom: 16, mode: m) == 2.0)
-        #expect(LyricHDR.level(progress: 1, strength: 0, headroom: 16, mode: m) == 1.5)
+        #expect(LyricHDR.baseValue(headroom: 16, mode: m) == 1.5)
+        #expect(LyricHDR.peakValue(strength: 0, headroom: 16, mode: m) == 1.65)
+        #expect(LyricHDR.peakValue(strength: 1, headroom: 16, mode: m) == 2.2)
+        #expect(abs(LyricHDR.peakValue(strength: 0.5, headroom: 16, mode: m) - 1.925) < 1e-9)
+        #expect(LyricHDR.level(progress: 0, strength: 1, headroom: 16, mode: m) == 1.5)
+        #expect(LyricHDR.level(progress: 1, strength: 1, headroom: 16, mode: m) == 2.2)
+        #expect(LyricHDR.level(progress: 1, strength: 0, headroom: 16, mode: m) == 1.65)
     }
 
     @Test func modeValuesAreClampedByPotential() {
@@ -69,7 +69,7 @@ import Testing
         #expect(LyricHDR.level(progress: 1, strength: 1, headroom: 1.3, mode: m) == 1.3)
         #expect(LyricHDR.level(progress: 0, strength: 1, headroom: 1.3, mode: m) == 1.3)
         // The host asks for the mode's peakMax and the screen's potential caps it.
-        #expect(LyricHDR.headroom(isDark: true, potential: 16, target: m.peakMax) == 2.0)
+        #expect(LyricHDR.headroom(isDark: true, potential: 16, target: m.peakMax) == 2.2)
         #expect(LyricHDR.headroom(isDark: true, potential: 1.6, target: m.peakMax) == 1.6)
         #expect(LyricHDR.headroom(isDark: false, potential: 16, target: m.peakMax) == nil)
         // The default argument keeps the standard values.

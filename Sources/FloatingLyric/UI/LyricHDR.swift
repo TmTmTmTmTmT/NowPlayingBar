@@ -27,16 +27,16 @@ enum LyricHDR {
         var base: CGFloat {
             switch self {
             case .standard: return Metrics.fillMultiplier
-            case .clearFrost: return 1.10
-            case .plainClear: return 1.35
+            case .clearFrost: return 1.22
+            case .plainClear: return 1.5
             }
         }
         /// Emphasis peak for the weakest group (s = 0).
         var peakMin: CGFloat {
             switch self {
             case .standard: return Metrics.peakMin
-            case .clearFrost: return 1.25
-            case .plainClear: return 1.5
+            case .clearFrost: return 1.38
+            case .plainClear: return 1.65
             }
         }
         /// Emphasis peak for the strongest group (s = 1). This is also the `headroom` target the host
@@ -44,8 +44,8 @@ enum LyricHDR {
         var peakMax: CGFloat {
             switch self {
             case .standard: return Metrics.peakMax
-            case .clearFrost: return 1.7
-            case .plainClear: return 2.0
+            case .clearFrost: return 1.85
+            case .plainClear: return 2.2
             }
         }
     }
