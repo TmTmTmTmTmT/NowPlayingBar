@@ -139,6 +139,9 @@ final class LyricsView: NSView {
     private var cleanupWork: DispatchWorkItem?
     /// Created on first start; never touched in `deinit` unless it exists (FIX_GUIDE F13).
     private var driver: LyricFrameDriver?
+    /// Injected, or created on first `show()` (never in `deinit` unless it exists).
+    private var outputLatency: OutputLatencySource?
+    private var atmosOffset: TimeInterval = 0
     private var occlusionObserver: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
     private var screenParamsObserver: NSObjectProtocol?
@@ -154,8 +157,9 @@ final class LyricsView: NSView {
 
     // MARK: Init
 
-    init(preferences: LyricPreferences = .shared) {
+    init(preferences: LyricPreferences = .shared, outputLatency: OutputLatencySource? = nil) {
         self.preferences = preferences
+        self.outputLatency = outputLatency
         super.init(frame: .zero)
         wantsLayer = true
         layerUsesCoreImageFilters = true      // lets CIGaussianBlur on line layers render
@@ -186,6 +190,7 @@ final class LyricsView: NSView {
     deinit {
         resumeTimer?.invalidate()
         driver?.stop()
+        outputLatency?.stop()
         if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         if let screenParamsObserver { NotificationCenter.default.removeObserver(screenParamsObserver) }
@@ -201,10 +206,12 @@ final class LyricsView: NSView {
         self.document = usable
         clock.resetDisplayedPosition()      // new track or document: start from its real position
         let setting = AtmosSetting.rawValue()
-        clock.timingOffset = (AtmosSetting.autoCompensate && usable?.isAtmos == true
-                              && AtmosSetting.isEnabled(rawValue: setting)) ? -AtmosSetting.delay : 0
+        atmosOffset = (AtmosSetting.autoCompensate && usable?.isAtmos == true
+                       && AtmosSetting.isEnabled(rawValue: setting)) ? -AtmosSetting.delay : 0
+        startOutputLatency()
+        applyTimingOffset()
         if usable?.isAtmos == true {
-            log.notice("atmos=true setting=\(setting.map(String.init) ?? "none", privacy: .public) offset=\(self.clock.timingOffset, privacy: .public)")
+            log.notice("atmos=true setting=\(setting.map(String.init) ?? "none", privacy: .public) offset=\(self.atmosOffset, privacy: .public)")
         }
         self.emptyState = usable == nil ? (emptyState == .none && document != nil ? .noLyrics : emptyState) : .none
         endUserScroll()
@@ -251,8 +258,25 @@ final class LyricsView: NSView {
         return glass.blurHidden ? .plainClear : .clearFrost
     }
 
+    /// timingOffset = Atmos offset + (-output delay); no jump on change (PLAN 13.3).
+    private func applyTimingOffset() {
+        let delay = preferences.bluetoothDelay ? (outputLatency?.seconds ?? 0) : 0
+        clock.timingOffset = atmosOffset - delay
+    }
+
+    private func startOutputLatency() {
+        if outputLatency == nil {
+            let prefs = preferences
+            outputLatency = OutputLatency(isEnabled: { prefs.bluetoothDelay })
+        }
+        outputLatency?.onChange = { [weak self] _ in self?.applyTimingOffset() }
+        outputLatency?.start()
+    }
+
     /// Preferences changed (context, lines, size, blur, translation).
     func reload() {
+        outputLatency?.refresh()
+        applyTimingOffset()
         rebuildRows()
         updateEmptyLayer()
         if document != nil { tick(jump: true) }
@@ -433,8 +457,13 @@ final class LyricsView: NSView {
     }
 
     private func tick(jump: Bool) {
+        guard document != nil, !rows.isEmpty else { return }
+        step(at: clock.position(at: Date()), jump: jump)
+    }
+
+    /// One frame at lyric time `t` (split from `tick` so tests can drive time).
+    func step(at t: TimeInterval, jump: Bool) {
         guard let doc = document, !rows.isEmpty else { return }
-        let t = clock.position(at: Date())
         let (newFocus, progress) = currentFocus(at: t, doc: doc)
         if newFocus != focus || jump {
             // Lines that just stopped lingering get their last glyph filled once.
@@ -443,7 +472,12 @@ final class LyricsView: NSView {
                     rows[lineRow[i]].line?.setPosition(LyricsLayout.sungEnd(of: doc.lines[i]), animated: false)
                 }
             }
-            lineMoveDuration = LyricsLayout.lineTransitionDuration(fromLine: focus?.activeLine, toLine: newFocus.activeLine, lines: doc.lines)
+            // Only a new center is a line move; a lingering-only change keeps the running move's time (F25).
+            let centerChanged = jump || focus == nil || focus?.activeLine != newFocus.activeLine
+                || focus?.interludeBefore != newFocus.interludeBefore
+            if centerChanged {
+                lineMoveDuration = LyricsLayout.lineTransitionDuration(fromLine: focus?.activeLine, toLine: newFocus.activeLine, lines: doc.lines)
+            }
             focus = newFocus
             applyStates(newFocus, animated: !jump)
             applyLayout(animated: !jump && !isUserScrolling, lineTransition: true)
@@ -458,7 +492,27 @@ final class LyricsView: NSView {
     }
 
     /// Time of the current line-to-line move (set per focus change).
-    private var lineMoveDuration: CFTimeInterval = LyricsLayout.Metrics.slowLineTransition
+    private(set) var lineMoveDuration: CFTimeInterval = LyricsLayout.Metrics.slowLineTransition
+    /// Makes each position animation's key unique so moves stack instead of replacing each other (F25).
+    private var positionSerial = 0
+    private static let positionKeyPrefix = "scrollY."
+
+    /// Test hook: the stacked position animations on a line's layer, by key.
+    func positionAnimations(forLine i: Int) -> [String: CAAnimation] {
+        guard i >= 0, i < lineRow.count else { return [:] }
+        let layer = rows[lineRow[i]].layer
+        var out: [String: CAAnimation] = [:]
+        for k in layer.animationKeys() ?? [] where k.hasPrefix(Self.positionKeyPrefix) {
+            if let a = layer.animation(forKey: k) { out[k] = a }
+        }
+        return out
+    }
+
+    private func removePositionAnimations(_ layer: CALayer) {
+        for k in layer.animationKeys() ?? [] where k.hasPrefix(Self.positionKeyPrefix) {
+            layer.removeAnimation(forKey: k)
+        }
+    }
 
     private func fadeRows(duration: CFTimeInterval) {
         let a = CABasicAnimation(keyPath: "opacity")
@@ -546,26 +600,38 @@ final class LyricsView: NSView {
             if s.isVisible || show { layer.isHidden = false }
             if s.isVisible { row.line?.loadContent() }
 
-            let fromY = layer.presentation()?.position.y ?? layer.position.y
+            // Targets of the previous layout (model values); animations only start when the target changes (F25).
+            let oldY = layer.position.y
+            let oldTargetOpacity = layer.opacity
+            let oldTargetScale = layer.transform.m11
             let fromOpacity = layer.presentation()?.opacity ?? layer.opacity
             let fromTransform = layer.presentation()?.transform ?? layer.transform
             layer.position = CGPoint(x: posX, y: posY)
             layer.opacity = Float(targetOpacity)
             layer.transform = xform
 
-            if animate && abs(fromY - posY) > 0.5 {
+            // Jumps, user scrolling and Reduce Motion drop every stacked move; otherwise they keep running.
+            if !animate || reduce { removePositionAnimations(layer) }
+            if animate && abs(oldY - posY) > 0.5 {
                 if reduce { addFade(layer, from: 0, to: Float(targetOpacity)) }
-                else if lineTransition { layer.add(ease("position.y", from: fromY, to: posY, delay: delay, layer: layer, line: true), forKey: "scrollY") }
-                else { layer.add(spring(from: fromY, to: posY, delay: delay, layer: layer), forKey: "scrollY") }
+                else {
+                    // Additive "old target - new target -> 0": a move in flight keeps its speed and the new one adds on top.
+                    let a: CABasicAnimation = lineTransition
+                        ? ease("position.y", from: oldY - posY, to: CGFloat(0), delay: delay, layer: layer, line: true)
+                        : spring(from: oldY - posY, to: 0, delay: delay, layer: layer)
+                    a.isAdditive = true
+                    positionSerial += 1
+                    layer.add(a, forKey: Self.positionKeyPrefix + String(positionSerial))
+                }
             }
             if animate && !reduce {
-                if abs(Float(targetOpacity) - fromOpacity) > 0.01 {
+                if abs(Float(targetOpacity) - oldTargetOpacity) > 0.01 {
                     layer.add(ease("opacity", from: fromOpacity, to: Float(targetOpacity), delay: delay, layer: layer, line: lineTransition), forKey: "fadeTo")
                 }
-                if abs(fromTransform.m11 - s.scale) > 0.001 {
+                if abs(oldTargetScale - s.scale) > 0.001 {
                     layer.add(ease("transform.scale", from: fromTransform.m11, to: s.scale, delay: delay, layer: layer, line: lineTransition), forKey: "scaleTo")
                 }
-            } else if !animate { layer.removeAnimation(forKey: "scrollY") }
+            }
 
             applyBlur(layer, radius: (wantBlur && show) ? s.blurRadius : -1, previous: lastBlur[r],
                       animate: animate && !reduce, delay: delay, line: lineTransition)

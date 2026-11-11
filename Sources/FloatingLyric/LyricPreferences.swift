@@ -22,6 +22,7 @@ public final class LyricPreferences {
         static let clickThrough     = "lyric.floating.clickThrough"
         static let pausedHideDelay  = "lyric.pausedHideDelay"
         static let blurInactive     = "lyric.blurInactive"
+        static let bluetoothDelay   = "lyric.bluetoothDelay"
         static let clickToSeek      = "lyric.clickToSeek"
         static let showTranslation  = "lyric.showTranslation"
         static let lastTab          = "lyric.lastTab"
@@ -74,6 +75,7 @@ public final class LyricPreferences {
             Key.floatingLocked:  false,
             Key.clickThrough:    false,
             Key.blurInactive:    true,
+            Key.bluetoothDelay:  true,
             Key.clickToSeek:     false,
             Key.showTranslation: false,
             Key.lastTab:         Tab.lyrics.rawValue,
@@ -162,6 +164,12 @@ public final class LyricPreferences {
     public var blurInactive: Bool {
         get { defaults.bool(forKey: Key.blurInactive) }
         set { defaults.set(newValue, forKey: Key.blurInactive) }
+    }
+
+    /// Hold the lyrics back by the output delay when playing through Bluetooth (PLAN 13).
+    public var bluetoothDelay: Bool {
+        get { defaults.bool(forKey: Key.bluetoothDelay) }
+        set { defaults.set(newValue, forKey: Key.bluetoothDelay) }
     }
 
     /// Clicking a lyric line seeks to it. Off by default: it fights window dragging.

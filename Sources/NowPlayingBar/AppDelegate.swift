@@ -971,6 +971,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             get: { lp.clickThrough }, set: { lp.clickThrough = $0 }))
         sub.addItem(lyricToggleItem("Blur other lines",
             get: { lp.blurInactive }, set: { lp.blurInactive = $0 }))
+        sub.addItem(lyricToggleItem("Delay for Bluetooth audio",
+            get: { lp.bluetoothDelay }, set: { lp.bluetoothDelay = $0 }))
         sub.addItem(lyricToggleItem("Click line to seek",
             get: { lp.clickToSeek }, set: { lp.clickToSeek = $0 }))
         sub.addItem(lyricToggleItem("Show translation",
